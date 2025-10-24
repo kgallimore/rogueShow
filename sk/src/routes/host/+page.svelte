@@ -18,8 +18,7 @@
             // Handle transcription data here
         });
         speechRecog.connect();
-        		tts = new ElevenLabsTTS();
-		tts.initializeTTS();
+        tts = new ElevenLabsTTS();
 
     });
     onDestroy(() => {

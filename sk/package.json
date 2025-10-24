@@ -16,6 +16,7 @@
 	},
 	"devDependencies": {
 		"@deepgram/sdk": "^4.11.2",
+		"@elevenlabs/client": "^0.8.1",
 		"@elevenlabs/elevenlabs-js": "^2.20.1",
 		"@eslint/compat": "^1.4.0",
 		"@eslint/js": "^9.38.0",

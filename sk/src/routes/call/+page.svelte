@@ -26,7 +26,7 @@
 		}
 	});
 
-	const clientApiKey = await generateClientSecret();
+	const clientApiKey = await generateClientSecret({type: "realtime"});
 
 	async function startCall() {
 		const agent = new RealtimeAgent({

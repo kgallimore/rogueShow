@@ -20,10 +20,8 @@
 			connected = true;
 		});
 		socket.addEventListener('message', async (event) => {
-			// console.log("Incoming event:", event);
 
 			if (typeof event.data === 'string') {
-				console.log('Incoming text data:', event.data);
 
 				let msg = JSON.parse(event.data);
 
@@ -40,7 +38,6 @@
 					const blob = new Blob([correctedHeader], { type: 'audio/wav' });
 
 					if (window.MediaSource) {
-						console.log('MP4 audio is supported');
 						const audioContext = new AudioContext();
 
 						const reader = new FileReader();
