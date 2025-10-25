@@ -10,6 +10,8 @@ import {
 } from './websocketProxyClasses';
 
 export function setupWebSocketServer(wss: WSServer, server: ViteDevServer['httpServer']) {
+	const connections = new Set<BaseWebSocketHandler>();
+
 	wss.on('connection', (ws) => {
 		let messageHandler: BaseWebSocketHandler | null = null;
 		ws.on('message', async (message) => {
@@ -18,7 +20,6 @@ export function setupWebSocketServer(wss: WSServer, server: ViteDevServer['httpS
 				try {
 					const msgText = typeof message === 'string' ? message : message.toString();
 					const msgData = JSON.parse(msgText) as WebSocketInitialMessage;
-					console.log('Initial message data:', msgData);
 					if (msgData.speak) {
 						if (msgData.speak.type === 'elevenLabs') {
 							messageHandler = new ElevenLabsTTSSocketHandler(
@@ -31,8 +32,13 @@ export function setupWebSocketServer(wss: WSServer, server: ViteDevServer['httpS
 					} else if (msgData.transcribe) {
 						messageHandler = new DeepgramTranscriptionSocketHandler(ws);
 					} else {
+						console.error('Unknown initial message type, closing connection.');
 						ws.close();
 						return;
+					}
+					// Track active connections
+					if (messageHandler) {
+						connections.add(messageHandler);
 					}
 				} catch (e) {
 					console.error('Failed to parse initial message:', e);
@@ -47,10 +53,25 @@ export function setupWebSocketServer(wss: WSServer, server: ViteDevServer['httpS
 		});
 
 		ws.on('close', () => {
-			messageHandler?.close();
+			if (messageHandler) {
+				messageHandler.close();
+				connections.delete(messageHandler);
+			}
 		});
 	});
+
+	// Clean up all connections when server closes
 	server?.on('close', () => {
+		console.log('HTTP server closing, cleaning up WebSocket connections...');
+		connections.forEach((handler) => handler.close());
+		connections.clear();
 		wss.close();
+	});
+
+	// Also handle WebSocket server close event
+	wss.on('close', () => {
+		console.log('WebSocket server closed, cleaning up connections...');
+		connections.forEach((handler) => handler.close());
+		connections.clear();
 	});
 }

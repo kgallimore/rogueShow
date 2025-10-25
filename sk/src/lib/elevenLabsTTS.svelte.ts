@@ -8,7 +8,12 @@ export class ElevenLabsTTS extends BaseWebsocketClient {
 	connected = $state(false);
 	errorMessage = $state('');
 	textInput = $state('');
-	enableDeepBoomyEffect = $state(false); // Toggle for voice effect
+	audioContext: AudioContext | null = null;
+	nextPlayTime = 0;
+	scheduledSources: AudioBufferSourceNode[] = [];
+	pcmChunks: ArrayBuffer[] = [];
+	minChunkSize = 24000 * 2 * 0.5; // 0.5 seconds of PCM at 24kHz, 16-bit
+	processingQueue: Promise<void> = Promise.resolve();
 
 	constructor() {
 		super({ speak: { type: 'elevenLabs' } });
@@ -19,61 +24,157 @@ export class ElevenLabsTTS extends BaseWebsocketClient {
 			const msg = JSON.parse(event.data);
 
 			if (msg.type === 'Open') {
-				// Connection opened
+				// Connection opened - initialize audio context
+				if (!this.audioContext) {
+					this.audioContext = new AudioContext();
+					this.nextPlayTime = this.audioContext.currentTime;
+				}
+				this.pcmChunks = [];
 			} else if (msg.type === 'Error') {
 				this.errorMessage += 'WebSocket error occurred: ' + JSON.stringify(msg);
 			} else if (msg.type === 'Close') {
 				this.connected = false;
 			} else if (msg.isFinal === true) {
-				const concatenatedBuffer = await concatenateChunks(this.audioChunks);
-				const correctedHeader = correctWavHeader(new Uint8Array(concatenatedBuffer));
-				// All data received, now combine chunks and play audio
-				// Ensure the data is backed by a plain ArrayBuffer (not a SharedArrayBuffer or other ArrayBufferLike)
-				const uint8 = new Uint8Array(correctedHeader.length);
-				uint8.set(correctedHeader);
-				const blob = new Blob([uint8.buffer], { type: 'audio/wav' });
+				// Final message - flush any remaining PCM data
+				// Wait for any pending processing to complete first
+				this.processingQueue = this.processingQueue.then(async () => {
+					if (this.pcmChunks.length > 0) {
+						await this.flushPCMChunks();
+					}
 
-				if (window.MediaSource) {
-					const audioContext = new AudioContext();
-
-					const reader = new FileReader();
-					reader.onload = async () => {
-						const arrayBuffer = reader.result;
-						if (!(arrayBuffer instanceof ArrayBuffer)) {
-							console.error('Failed to read audio data as ArrayBuffer');
-							return;
-						}
-
-						audioContext.decodeAudioData(arrayBuffer, async (buffer) => {
-							// Apply deep boomy effect if enabled
-
-							const source = audioContext.createBufferSource();
-							source.buffer = buffer;
-							source.connect(audioContext.destination);
-							source.start();
-
-							this.audioPlaying = true;
-
-							source.onended = () => {
-								// Clear the buffer
-								this.audioChunks = [];
-								this.audioPlaying = false;
-							};
-						});
-					};
-					reader.readAsArrayBuffer(blob);
-				} else {
-					console.error('Audio is NOT supported');
-				}
-
-				// Clear the buffer
-				this.audioChunks = [];
+					// Set up cleanup when all scheduled audio finishes
+					if (this.scheduledSources.length > 0) {
+						const lastSource = this.scheduledSources[this.scheduledSources.length - 1];
+						lastSource.onended = () => {
+							this.audioPlaying = false;
+							this.scheduledSources = [];
+						};
+					} else {
+						this.audioPlaying = false;
+					}
+				});
 			}
 		}
 
 		if (event.data instanceof ArrayBuffer) {
-			// Incoming audio binary data
+			// Incoming audio binary data - accumulate PCM chunks
 			this.audioChunks.push(event.data);
+			this.pcmChunks.push(event.data);
+
+			// Calculate total PCM data size
+			const totalPCMSize = this.pcmChunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+
+			// When we have enough data, flush it to playback
+			// Use a queue to ensure sequential processing
+			if (totalPCMSize >= this.minChunkSize) {
+				this.processingQueue = this.processingQueue.then(() => this.flushPCMChunks());
+			}
+		}
+	}
+
+	async flushPCMChunks() {
+		if (this.pcmChunks.length === 0) return;
+
+		// Concatenate all PCM chunks
+		const totalSize = this.pcmChunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+		const pcmData = new Uint8Array(totalSize);
+		let offset = 0;
+		for (const chunk of this.pcmChunks) {
+			pcmData.set(new Uint8Array(chunk), offset);
+			offset += chunk.byteLength;
+		}
+
+		// Create a WAV file from the PCM data
+		const wavBuffer = this.createWavFile(pcmData, 24000, 1, 16);
+
+		// Clear the buffer for next batch
+		this.pcmChunks = [];
+
+		// Play the audio
+		await this.playAudioChunk(wavBuffer);
+	}
+
+	createWavFile(
+		pcmData: Uint8Array,
+		sampleRate: number,
+		channels: number,
+		bitsPerSample: number
+	): ArrayBuffer {
+		const header = new ArrayBuffer(44);
+		const view = new DataView(header);
+
+		const byteRate = (sampleRate * channels * bitsPerSample) / 8;
+		const blockAlign = (channels * bitsPerSample) / 8;
+
+		// "RIFF" chunk descriptor
+		view.setUint32(0, 0x52494646, false); // "RIFF"
+		view.setUint32(4, 36 + pcmData.length, true); // File size - 8
+		view.setUint32(8, 0x57415645, false); // "WAVE"
+
+		// "fmt " sub-chunk
+		view.setUint32(12, 0x666d7420, false); // "fmt "
+		view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
+		view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
+		view.setUint16(22, channels, true); // NumChannels
+		view.setUint32(24, sampleRate, true); // SampleRate
+		view.setUint32(28, byteRate, true); // ByteRate
+		view.setUint16(32, blockAlign, true); // BlockAlign
+		view.setUint16(34, bitsPerSample, true); // BitsPerSample
+
+		// "data" sub-chunk
+		view.setUint32(36, 0x64617461, false); // "data"
+		view.setUint32(40, pcmData.length, true); // Subchunk2Size
+
+		// Combine header and PCM data
+		const wavFile = new Uint8Array(44 + pcmData.length);
+		wavFile.set(new Uint8Array(header), 0);
+		wavFile.set(pcmData, 44);
+
+		return wavFile.buffer;
+	}
+
+	async playAudioChunk(chunk: ArrayBuffer) {
+		if (!this.audioContext) {
+			this.audioContext = new AudioContext();
+			this.nextPlayTime = this.audioContext.currentTime;
+		}
+
+		try {
+			// Decode the audio chunk
+			const audioBuffer = await this.audioContext.decodeAudioData(chunk.slice(0));
+
+			// Create source
+			const source = this.audioContext.createBufferSource();
+			source.buffer = audioBuffer;
+			source.connect(this.audioContext.destination);
+
+			// Schedule playback - ensure we never schedule in the past
+			const playTime = Math.max(
+				this.nextPlayTime,
+				this.audioContext.currentTime + 0.01 // Small buffer to avoid glitches
+			);
+			source.start(playTime);
+
+			// Update next play time
+			this.nextPlayTime = playTime + audioBuffer.duration;
+
+			// Track the source
+			this.scheduledSources.push(source);
+
+			// Mark as playing
+			if (!this.audioPlaying) {
+				this.audioPlaying = true;
+			}
+
+			// Cleanup old sources
+			source.onended = () => {
+				const index = this.scheduledSources.indexOf(source);
+				if (index > -1) {
+					this.scheduledSources.splice(index, 1);
+				}
+			};
+		} catch (error) {
+			console.error('Error decoding/playing audio chunk:', error);
 		}
 	}
 
@@ -88,70 +189,14 @@ export class ElevenLabsTTS extends BaseWebsocketClient {
 		}
 	}
 
-	onClose() {}
-}
-
-function correctWavHeader(view: Uint8Array) {
-	// Create a new buffer to ensure we're working with a clean ArrayBuffer
-	const buffer = new ArrayBuffer(view.length);
-	const newView = new Uint8Array(buffer);
-	newView.set(view);
-
-	const dataView = new DataView(buffer);
-
-	// Verify we have at least a minimal WAV header (44 bytes)
-	if (newView.length < 44) {
-		console.error('Buffer too small for WAV header:', newView.length);
-		return newView;
-	}
-
-	// Verify this is actually a WAV file
-	const riff = String.fromCharCode(newView[0], newView[1], newView[2], newView[3]);
-	const wave = String.fromCharCode(newView[8], newView[9], newView[10], newView[11]);
-	if (riff !== 'RIFF' || wave !== 'WAVE') {
-		console.error('Not a valid WAV file. RIFF:', riff, 'WAVE:', wave);
-		return newView;
-	}
-
-	// Correct file size (total size - 8 bytes)
-	dataView.setUint32(4, newView.length - 8, true);
-
-	// Correct fmt chunk
-	const sampleRate = dataView.getUint32(24, true);
-	const numChannels = dataView.getUint16(22, true);
-	const bitsPerSample = dataView.getUint16(34, true);
-
-	const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
-	dataView.setUint32(28, byteRate, true);
-
-	const blockAlign = (numChannels * bitsPerSample) / 8;
-	dataView.setUint16(32, blockAlign, true);
-
-	// Find and correct data chunk size
-	let dataChunkSize = 0;
-	for (let i = 36; i < newView.length - 8; i++) {
-		if (
-			newView[i] === 0x64 &&
-			newView[i + 1] === 0x61 &&
-			newView[i + 2] === 0x74 &&
-			newView[i + 3] === 0x61
-		) {
-			dataChunkSize = newView.length - i - 8;
-			dataView.setUint32(i + 4, dataChunkSize, true);
-			break;
+	sendTTSEnd() {
+		if (this.socket && this.connected) {
+			const sendMessage: WebsocketProxyMessage = {
+				speak: ''
+			};
+			this.socket.send(JSON.stringify(sendMessage));
 		}
 	}
 
-	return newView;
-}
-
-async function concatenateChunks(chunks: ArrayBuffer[]) {
-	const totalLength = chunks.reduce((acc, chunk) => acc + chunk.byteLength, 0);
-	const result = new Uint8Array(totalLength);
-	let offset = 0;
-	for (const chunk of chunks) {
-		result.set(new Uint8Array(chunk), offset);
-		offset += chunk.byteLength;
-	}
-	return result.buffer;
+	onClose() {}
 }

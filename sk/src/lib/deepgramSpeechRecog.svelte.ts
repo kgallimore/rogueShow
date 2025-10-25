@@ -1,5 +1,7 @@
-export class DeepgramSpeechRecog extends EventTarget {
-	ws: WebSocket | null = null;
+import { BaseWebsocketClient } from './baseWebsocketClient.svelte';
+import type { WebsocketClientReceiveMessageJson } from './types';
+
+export class DeepgramSpeechRecog extends BaseWebsocketClient {
 	audioContext: AudioContext | null = null;
 	mediaStream: MediaStream | null = null;
 	workletNode: AudioWorkletNode | null = null;
@@ -7,27 +9,19 @@ export class DeepgramSpeechRecog extends EventTarget {
 	isStreaming: boolean = $state(false);
 	transcriptions: string[] = $state(['']);
 	inTurn: boolean = false;
+	mute: boolean = $state(false);
 
-	connect() {
-		this.ws = new WebSocket('ws://localhost:24678');
+	constructor() {
+		super({ transcribe: {} });
+	}
 
-		this.ws.onopen = () => {
-			console.log('Connected to Deepgram');
-		};
+	async handleMessage(websocketMessage: MessageEvent<string>): Promise<void> {
+		const data = JSON.parse(websocketMessage.data) as WebsocketClientReceiveMessageJson;
+		if (data.transcription) this.handleTranscription(data.transcription);
+	}
 
-		this.ws.onmessage = (event) => {
-			const data = JSON.parse(event.data);
-			this.handleTranscription(data);
-		};
-
-		this.ws.onclose = () => {
-			console.log('Disconnected from Deepgram');
-			this.stop();
-		};
-
-		this.ws.onerror = (error) => {
-			console.error('WebSocket error:', error);
-		};
+	onClose(): void {
+		this.stop();
 	}
 
 	// Start streaming audio from microphone
@@ -65,9 +59,14 @@ export class DeepgramSpeechRecog extends EventTarget {
 		// Handle audio data from worklet
 		// The audio-processor sends Int16Array.buffer (ArrayBuffer) containing PCM audio data
 		this.workletNode.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-			if (this.isStreaming && this.ws && this.ws.readyState === WebSocket.OPEN) {
+			if (
+				this.isStreaming &&
+				!this.mute &&
+				this.socket &&
+				this.socket.readyState === WebSocket.OPEN
+			) {
 				// Send PCM audio data directly as binary (not JSON)
-				this.ws.send(event.data);
+				this.socket.send(event.data);
 			}
 		};
 
@@ -104,19 +103,15 @@ export class DeepgramSpeechRecog extends EventTarget {
 
 	// Disconnect WebSocket
 	disconnect() {
-		if (this.ws) {
+		if (this.socket) {
 			this.stop();
-			this.ws.close();
-			this.ws = null;
+			this.socket.close();
+			this.socket = null;
 		}
 	}
 
 	// Handle transcription messages
-	handleTranscription(data: {
-		type: string;
-		transcript: string;
-		event: 'StartOfTurn' | 'Update' | 'EndOfTurn';
-	}) {
+	handleTranscription(data: NonNullable<WebsocketClientReceiveMessageJson['transcription']>) {
 		if (data.type === 'TurnInfo') {
 			const transcript = data.transcript;
 			const event = data.event;

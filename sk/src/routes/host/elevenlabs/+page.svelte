@@ -5,7 +5,7 @@
 
 	let { data }: PageProps = $props();
 	let tts: ElevenLabsTTS | null = $state(null);
-	let textInput: string = $state('Hello, this is a test of Eleven Labs text to speech.');
+	let textInput: string = $state('The rough soldier thought about the quiet queue outside the city, where a young knight coughed through the night, sewing a tough, though beautiful, coat for his friend.');
 
 	onMount(() => {
 		tts = new ElevenLabsTTS();
@@ -16,7 +16,12 @@
 		}
 	});
 	async function sendTTS() {
-		tts?.sendTTSMessage(textInput);
+		for(const word of textInput.split(" ")) {
+			tts?.sendTTSMessage(word + " ");
+			await new Promise((resolve) => setTimeout(resolve, 300)); // slight delay between words
+		}
+		await new Promise((resolve) => setTimeout(resolve, 300)); // slight delay between words
+		tts?.sendTTSEnd();
 	}
 </script>
 {#if tts}
@@ -24,7 +29,6 @@
 	>Start Eleven Labs TTS</button
 >
 <input type="text" bind:value={textInput} placeholder="Enter text to speak" />
-<input type="checkbox" bind:checked={tts.enableDeepBoomyEffect} /> Deep Boomy Effect
 <br />
 {#if tts.talking}
 	<p>Talking...</p>

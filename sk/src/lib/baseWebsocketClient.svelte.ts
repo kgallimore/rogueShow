@@ -1,8 +1,9 @@
 import type { WebSocketInitialMessage } from './types';
-export abstract class BaseWebsocketClient {
+export abstract class BaseWebsocketClient extends EventTarget {
 	connected = $state(false);
 	socket: WebSocket | null;
 	constructor(initData: WebSocketInitialMessage) {
+		super();
 		this.socket = new WebSocket(`ws://localhost:24678`);
 		// Set binary type to handle audio data properly
 		this.socket.binaryType = 'arraybuffer';

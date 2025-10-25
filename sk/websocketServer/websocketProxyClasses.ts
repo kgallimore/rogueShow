@@ -1,6 +1,10 @@
 import 'dotenv/config';
 import { createClient, LiveTTSEvents, type SpeakLiveClient } from '@deepgram/sdk';
-import type { WebsocketClientReceiveMessage, WebsocketProxyMessage } from '$lib/types';
+import type {
+	DeepgramTranscription,
+	WebsocketClientReceiveMessage,
+	WebsocketProxyMessage
+} from '$lib/types';
 import WebSocket from 'ws';
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
@@ -75,7 +79,7 @@ export abstract class BaseWebSocketHandler {
 export class ElevenLabsTTSSocketHandler extends BaseWebSocketHandler {
 	elevenSocket: WebSocket | null = null;
 	voiceId: string;
-	private headerSent = false;
+	textQueue: string = '';
 
 	constructor(voiceId: string, clientSocket: WebSocket) {
 		super(clientSocket);
@@ -99,16 +103,14 @@ export class ElevenLabsTTSSocketHandler extends BaseWebSocketHandler {
 	}
 
 	connectElevenLabsTTS(text: string) {
-		const url = `wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=eleven_flash_v2_5&output_format=pcm_24000`;
+		const url = `wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=eleven_flash_v2_5&output_format=pcm_24000&sync_alignment=true`;
 		if (!this.elevenSocket) {
+			this.textQueue = text;
 			this.elevenSocket = new WebSocket(url, {
 				headers: { 'xi-api-key': `${ELEVENLABS_API_KEY}` }
 			});
 
 			this.elevenSocket.on('open', async () => {
-				// Reset header state at the start of a new stream
-				this.headerSent = false;
-
 				// First, send the configuration with proper BOS (Beginning of Stream) format
 				this.elevenSocket!.send(
 					JSON.stringify({
@@ -116,19 +118,16 @@ export class ElevenLabsTTSSocketHandler extends BaseWebSocketHandler {
 						voice_settings: {
 							stability: 0.5,
 							similarity_boost: 0.8,
-							use_speaker_boost: false
-						},
-						generation_config: {
-							chunk_length_schedule: [120, 160, 250, 290]
+							use_speaker_boost: false,
+							speed: 1.2
 						}
+						// generator_config: {
+						// 	chunk_length_schedule: [50, 100, 150, 250]
+						// }
 					})
 				);
-
 				// Then send the actual text
-				this.elevenSocket!.send(JSON.stringify({ text }));
-
-				// Finally send EOS (End of Stream) signal
-				this.elevenSocket!.send(JSON.stringify({ text: '' }));
+				this.elevenSocket!.send(JSON.stringify({ text: this.textQueue }));
 			});
 			this.elevenSocket.on('message', (event) => {
 				let parsed: Record<string, unknown>;
@@ -153,31 +152,31 @@ export class ElevenLabsTTSSocketHandler extends BaseWebSocketHandler {
 					return;
 				}
 
-				// Audio chunks arrive as base64 PCM; prepend WAV header once so browser decoders are happy
+				// Audio chunks arrive as base64 PCM; send directly without WAV header
 				const audioBuffer = Buffer.from(audioField, 'base64');
-
-				if (!this.headerSent) {
-					const header = createWavHeader(24000, 1, 16);
-					this.sendClient(header);
-					this.headerSent = true;
-				}
 				this.sendClient(audioBuffer);
 			});
 			this.elevenSocket.on('error', (error) => {
 				console.error('ElevenLabs TTS WebSocket error:', error);
 				this.sendClient({ type: 'Error', error: error.message });
 			});
-			this.elevenSocket.on('close', (code, reason) => {
-				const reasonText = reason?.toString() || '';
-				console.log('ElevenLabs TTS WebSocket closed', { code, reason: reasonText });
+			this.elevenSocket.on('close', () => {
 				this.elevenSocket = null;
-				this.headerSent = false;
 			});
 			// Extra visibility into handshake issues
 			this.elevenSocket.on('unexpected-response', (_req, res) => {
 				console.error('ElevenLabs unexpected response', res.statusCode, res.statusMessage);
 			});
+			return;
 		}
+		if (this.elevenSocket.readyState !== WebSocket.OPEN) {
+			this.textQueue += text;
+			return;
+		}
+		if (text === '') {
+			this.elevenSocket.send(JSON.stringify({ text: ' ', flush: true }));
+		}
+		this.elevenSocket.send(JSON.stringify({ text }));
 	}
 
 	close() {
@@ -186,43 +185,6 @@ export class ElevenLabsTTSSocketHandler extends BaseWebSocketHandler {
 			this.elevenSocket = null;
 		}
 	}
-}
-
-// Utility to create a minimal WAV header for PCM s16le with unknown data length (sizes will be fixed client-side)
-function createWavHeader(sampleRate: number, channels: number, bitsPerSample: number) {
-	const header = Buffer.alloc(44);
-	let offset = 0;
-	// "RIFF"
-	header.write('RIFF', offset);
-	offset += 4;
-	header.writeUInt32LE(0, offset);
-	offset += 4; // file size placeholder
-	header.write('WAVE', offset);
-	offset += 4;
-	// fmt chunk
-	header.write('fmt ', offset);
-	offset += 4;
-	header.writeUInt32LE(16, offset);
-	offset += 4; // PCM chunk size
-	header.writeUInt16LE(1, offset);
-	offset += 2; // audio format PCM
-	header.writeUInt16LE(channels, offset);
-	offset += 2;
-	header.writeUInt32LE(sampleRate, offset);
-	offset += 4;
-	const byteRate = (sampleRate * channels * bitsPerSample) / 8;
-	header.writeUInt32LE(byteRate, offset);
-	offset += 4;
-	const blockAlign = (channels * bitsPerSample) / 8;
-	header.writeUInt16LE(blockAlign, offset);
-	offset += 2;
-	header.writeUInt16LE(bitsPerSample, offset);
-	offset += 2;
-	// data chunk
-	header.write('data', offset);
-	offset += 4;
-	header.writeUInt32LE(0, offset); // data size placeholder
-	return header;
 }
 
 export class DeepgramTTSSocketHandler extends BaseWebSocketHandler {
@@ -308,49 +270,78 @@ export class DeepgramTTSSocketHandler extends BaseWebSocketHandler {
 
 export class DeepgramTranscriptionSocketHandler extends BaseWebSocketHandler {
 	dgTransSocket: WebSocket | null = null;
+	private isConnected = false;
+	private audioQueue: WebSocket.RawData[] = [];
+
 	constructor(clientSocket: WebSocket) {
 		super(clientSocket);
 	}
+
 	handleMessage(message: WebSocket.RawData) {
-		if (typeof message === 'string') {
-			// Ignore non-binary messages
-			this.handleTextMessage(message);
-			return;
-		}
 		this.transcribeAudio(message);
 	}
 
-	handleTextMessage(_message: string) {
-		void _message;
-		// Handle any text-based commands if needed
-		return;
+	connectDeepgram() {
+		this.dgTransSocket = new WebSocket(
+			`wss://api.deepgram.com/v2/listen?model=flux-general-en&sample_rate=16000&encoding=linear16&eot_threshold=0.8`,
+			{
+				headers: {
+					Authorization: `Token ${DEEPGRAM_API_KEY}`
+				}
+			}
+		);
+
+		this.dgTransSocket.on('open', () => {
+			this.isConnected = true;
+
+			// Send any queued audio data
+			while (this.audioQueue.length > 0) {
+				const queuedAudio = this.audioQueue.shift();
+				if (queuedAudio && this.dgTransSocket) {
+					this.dgTransSocket.send(queuedAudio);
+				}
+			}
+		});
+
+		this.dgTransSocket.on('message', (dgMessage) => {
+			// Convert data to string if it's binary
+			const messageText = typeof dgMessage === 'string' ? dgMessage : dgMessage.toString('utf8');
+			const parsed = JSON.parse(messageText) as DeepgramTranscription;
+			if (parsed?.type === 'TurnInfo') this.sendClient({ transcription: parsed });
+		});
+
+		this.dgTransSocket.on('error', (error) => {
+			console.error('Deepgram Transcription WebSocket error:', error);
+			this.sendClient({ type: 'Error', error: error.message });
+		});
+
+		this.dgTransSocket.on('close', () => {
+			this.isConnected = false;
+			this.dgTransSocket = null;
+		});
 	}
 
 	transcribeAudio(audioData: WebSocket.RawData) {
 		if (!this.dgTransSocket) {
-			this.dgTransSocket = new WebSocket(
-				`wss://api.deepgram.com/v2/listen?model=flux-general-en&sample_rate=16000&encoding=linear16&eot_threshold=0.8`,
-				{
-					headers: {
-						Authorization: `Token ${DEEPGRAM_API_KEY}`
-					}
-				}
-			);
+			this.connectDeepgram();
+			console.error('Deepgram socket not initialized');
+			return;
 		}
-		this.dgTransSocket.on('message', (dgMessage) => {
-			// Convert data to string if it's binary
-			const messageText = typeof dgMessage === 'string' ? dgMessage : dgMessage.toString('utf8');
 
-			this.sendClient({ transcription: JSON.parse(messageText).channel.alternatives[0] });
-		});
-		this.dgTransSocket.on('open', () => {
-			this.dgTransSocket!.send(audioData);
-		});
+		// If connected, send immediately; otherwise queue it
+		if (this.isConnected && this.dgTransSocket.readyState === WebSocket.OPEN) {
+			this.dgTransSocket.send(audioData);
+		} else {
+			this.audioQueue.push(audioData);
+		}
 	}
+
 	close() {
 		if (this.dgTransSocket) {
 			this.dgTransSocket.close();
 			this.dgTransSocket = null;
 		}
+		this.audioQueue = [];
+		this.isConnected = false;
 	}
 }

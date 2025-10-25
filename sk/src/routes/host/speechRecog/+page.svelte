@@ -42,7 +42,6 @@
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-        console.log(event.results);
         const result = event.results[0][0];
         if(!event.results[0].isFinal) return;
         transcript += result.transcript;
