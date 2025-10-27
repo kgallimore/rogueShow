@@ -12,7 +12,10 @@ export enum Collections {
 	Otps = "_otps",
 	Superusers = "_superusers",
 	GameState = "gameState",
+	ReesesProducts = "reesesProducts",
+	ReesesVotes = "reesesVotes",
 	RogueAgents = "rogueAgents",
+	Tiers = "tiers",
 	Users = "users",
 }
 
@@ -95,8 +98,27 @@ export type SuperusersRecord = {
 export type GameStateRecord = {
 	agent: number
 	created?: IsoDateString
+	currentProduct: RecordIdString
 	id: string
 	updated?: IsoDateString
+}
+
+export type ReesesProductsRecord = {
+	created?: IsoDateString
+	id: string
+	image: string[]
+	name: string
+	tier?: RecordIdString
+	updated?: IsoDateString
+}
+
+export type ReesesVotesRecord = {
+	created?: IsoDateString
+	id: string
+	product?: RecordIdString
+	tier?: RecordIdString
+	updated?: IsoDateString
+	user?: RecordIdString
 }
 
 export enum RogueAgentsTypeOptions {
@@ -109,6 +131,13 @@ export type RogueAgentsRecord = {
 	name: string
 	prompt: string
 	type: RogueAgentsTypeOptions
+	updated?: IsoDateString
+}
+
+export type TiersRecord = {
+	Rank: string
+	created?: IsoDateString
+	id: string
 	updated?: IsoDateString
 }
 
@@ -132,7 +161,10 @@ export type MfasResponse<Texpand = unknown> = Required<MfasRecord> & BaseSystemF
 export type OtpsResponse<Texpand = unknown> = Required<OtpsRecord> & BaseSystemFields<Texpand>
 export type SuperusersResponse<Texpand = unknown> = Required<SuperusersRecord> & AuthSystemFields<Texpand>
 export type GameStateResponse<Texpand = unknown> = Required<GameStateRecord> & BaseSystemFields<Texpand>
+export type ReesesProductsResponse<Texpand = unknown> = Required<ReesesProductsRecord> & BaseSystemFields<Texpand>
+export type ReesesVotesResponse<Texpand = unknown> = Required<ReesesVotesRecord> & BaseSystemFields<Texpand>
 export type RogueAgentsResponse<Texpand = unknown> = Required<RogueAgentsRecord> & BaseSystemFields<Texpand>
+export type TiersResponse<Texpand = unknown> = Required<TiersRecord> & BaseSystemFields<Texpand>
 export type UsersResponse<Texpand = unknown> = Required<UsersRecord> & AuthSystemFields<Texpand>
 
 // Types containing all Records and Responses, useful for creating typing helper functions
@@ -144,7 +176,10 @@ export type CollectionRecords = {
 	_otps: OtpsRecord
 	_superusers: SuperusersRecord
 	gameState: GameStateRecord
+	reesesProducts: ReesesProductsRecord
+	reesesVotes: ReesesVotesRecord
 	rogueAgents: RogueAgentsRecord
+	tiers: TiersRecord
 	users: UsersRecord
 }
 
@@ -155,7 +190,10 @@ export type CollectionResponses = {
 	_otps: OtpsResponse
 	_superusers: SuperusersResponse
 	gameState: GameStateResponse
+	reesesProducts: ReesesProductsResponse
+	reesesVotes: ReesesVotesResponse
 	rogueAgents: RogueAgentsResponse
+	tiers: TiersResponse
 	users: UsersResponse
 }
 
@@ -169,6 +207,9 @@ export type TypedPocketBase = PocketBase & {
 	collection(idOrName: '_otps'): RecordService<OtpsResponse>
 	collection(idOrName: '_superusers'): RecordService<SuperusersResponse>
 	collection(idOrName: 'gameState'): RecordService<GameStateResponse>
+	collection(idOrName: 'reesesProducts'): RecordService<ReesesProductsResponse>
+	collection(idOrName: 'reesesVotes'): RecordService<ReesesVotesResponse>
 	collection(idOrName: 'rogueAgents'): RecordService<RogueAgentsResponse>
+	collection(idOrName: 'tiers'): RecordService<TiersResponse>
 	collection(idOrName: 'users'): RecordService<UsersResponse>
 }
