@@ -24,10 +24,7 @@ export const load = (async ({ params, locals }) => {
 		await locals.pb.collection('users').authWithPassword(params.username, PB_USER_PASSWORD);
 	currentUser = locals.pb.authStore.record;
 
-	// Return shared password for client-side auto-login
-	// This is acceptable for a private, one-time use site
 	return {
-		pass: PB_USER_PASSWORD,
-		user: currentUser
+		pass: PB_USER_PASSWORD
 	};
 }) satisfies PageServerLoad;

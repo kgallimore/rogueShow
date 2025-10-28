@@ -2,16 +2,17 @@
 	import { onDestroy } from 'svelte';
 	import { page } from '$app/state';
 	import { getPocketBase, subscribeToCollection } from '$lib/pocketbase/client.svelte';
-	import type { UsersRecord, GameStateRecord } from '$lib/pocketbase/types';
+	import type { UsersRecord, GameStateRecord, GameStateResponse, ReesesProductsResponse } from '$lib/pocketbase/types';
 	import type { PageProps } from './$types';
-
 
 	let { data }: PageProps = $props();
 
-	let pb: ReturnType<typeof getPocketBase> | null = null;
+	type GameStateWithProduct = GameStateResponse<{currentProduct: ReesesProductsResponse}>;
+
+	let pb: ReturnType<typeof getPocketBase> | null = $state(null);
 	let isReady = $state(false);
 	let user: UsersRecord | null = $state(null);
-	let gameState = $state<GameStateRecord | null>(null);
+	let gameState = $state<GameStateWithProduct | null>(null);
 	let isRealtimeConnected = $state(false);
 	let unsubscribe: (() => void) | null = null;
 	
@@ -49,7 +50,7 @@
 
 		// Load initial game state
 		try {
-			const records = await pb.collection('gameState').getFullList<GameStateRecord>();
+			const records = await pb.collection('gameState').getFullList<GameStateWithProduct>({expand: "currentProduct"});
 			if (records.length > 0) {
 				gameState = records[0];
 			}
@@ -57,17 +58,17 @@
 			console.error('Failed to load game state:', error);
 		}
 
-		unsubscribe = subscribeToCollection<GameStateRecord>(
+		unsubscribe = subscribeToCollection<GameStateWithProduct>(
 			'gameState',
 			'*',
-			(data) => {
-				console.log('Realtime update:', data.action, data.record);
+			(newData) => {
+				console.log('Realtime update:', newData.action, newData.record);
 				isRealtimeConnected = true;
 				
-				if (data.action === 'delete') {
+				if (newData.action === 'delete') {
 					gameState = null;
 				} else {
-					gameState = data.record;
+					gameState = newData.record;
 				}
 			}
 		);
@@ -86,19 +87,12 @@
 {#if isReady}
 	<div class="p-4">
 		<h1 class="text-2xl font-bold mb-4">Player: {user?.name}</h1>
-		
-		<div class="mb-4">
-			{#if isRealtimeConnected}
-				<span class="text-green-600">🟢 Realtime connected</span>
-			{:else}
-				<span class="text-gray-500">⚪ Connecting to realtime...</span>
-			{/if}
-		</div>
 
 		{#if gameState}
 			<div class="bg-gray-100 p-4 rounded">
 				<h2 class="font-semibold mb-2">Game State</h2>
-				<p>Agent: {gameState.agent}</p>
+				<p>Product: {gameState.expand.currentProduct.name}</p>
+				<img src="{pb?.files.getURL(gameState.expand.currentProduct, gameState.expand.currentProduct.image[0])}" alt="{gameState.expand.currentProduct.name}" class="w-32 h-32 object-contain my-2"/>
 				<p class="text-sm text-gray-500">Updated: {new Date(gameState.updated || '').toLocaleString()}</p>
 			</div>
 		{:else}
