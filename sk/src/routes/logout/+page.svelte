@@ -5,7 +5,7 @@
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
-	
+
 	onMount(() => {
 		const pb = getPocketBase();
 		pb.authStore.clear();

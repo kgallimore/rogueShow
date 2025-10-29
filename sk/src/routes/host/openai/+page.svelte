@@ -198,7 +198,7 @@
 							bind:value={chatInput}
 							disabled={isStreamingText}
 							placeholder="Type a message... (Enter to send)"
-							class="flex-1 rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:opacity-50"
+							class="flex-1 rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:bg-gray-100 disabled:opacity-50"
 						/>
 						<button
 							disabled={isStreamingText || !chatInput.trim()}

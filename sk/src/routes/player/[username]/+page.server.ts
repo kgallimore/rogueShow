@@ -1,15 +1,10 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { PB_USER_PASSWORD } from '$env/static/private';
 
 export const load = (async ({ params, locals }) => {
-	let currentUser = locals.pb.authStore.record;
-	// If user is already authenticated, ensure they match the requested username
-	if (currentUser?.name && currentUser.name !== params.username) {
-		throw redirect(307, '/player/' + currentUser.name);
-	}
-
-	// Verify the requested user exists
+	// Only use adminPb on the server to verify the requested user exists.
+	// User authentication and signing-in are handled in the browser by the
+	// client PocketBase instance.
 	const { adminPb } = locals;
 	const userExist = await adminPb
 		.collection('users')
@@ -17,14 +12,17 @@ export const load = (async ({ params, locals }) => {
 		.catch(() => null);
 
 	if (!userExist) {
+		// If the player doesn't exist, redirect to home. Client-side will
+		// handle any further auth/redirect behavior.
 		throw redirect(307, '/');
 	}
 
-	if (!currentUser)
-		await locals.pb.collection('users').authWithPassword(params.username, PB_USER_PASSWORD);
-	currentUser = locals.pb.authStore.record;
-
+	// Return some public-ish user info for the client to render.
 	return {
-		pass: PB_USER_PASSWORD
+		player: {
+			id: userExist.id,
+			name: userExist.name ?? userExist.username ?? null
+			// Add any other non-sensitive fields you want exposed here
+		}
 	};
 }) satisfies PageServerLoad;

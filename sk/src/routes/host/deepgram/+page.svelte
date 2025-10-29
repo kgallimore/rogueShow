@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { WebsocketProxyMessage } from '$lib/types';
+	import type { WebsocketProxyMessage } from '$lib/types';
 	import type { PageProps } from './$types';
 	import { correctWavHeader, concatenateChunks } from '$lib/helpers';
 	import { onMount, onDestroy } from 'svelte';
@@ -20,9 +20,7 @@
 			connected = true;
 		});
 		socket.addEventListener('message', async (event) => {
-
 			if (typeof event.data === 'string') {
-
 				let msg = JSON.parse(event.data);
 
 				if (msg.type === 'Open') {
@@ -98,12 +96,11 @@
 				return;
 			}
 			const sendMessage: WebsocketProxyMessage = {
-				speak:{
-
-				text: textInput,
-				deepgram:{
-					model: 'aura-2-thalia-en'
-				}
+				speak: {
+					text: textInput,
+					deepgram: {
+						model: 'aura-2-thalia-en'
+					}
 				}
 			};
 			socket.send(JSON.stringify(sendMessage));

@@ -5,7 +5,6 @@ declare global {
 	namespace App {
 		// interface Error {}
 		interface Locals {
-			pb: TypedPocketBase;
 			adminPb: TypedPocketBase;
 		}
 		// interface PageData {}

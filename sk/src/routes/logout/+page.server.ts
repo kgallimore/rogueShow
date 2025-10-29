@@ -1,6 +1,5 @@
 import type { PageServerLoad } from './$types';
 
-export const load = (async ({ locals }) => {
-	locals.pb.authStore.clear();
+export const load = (async () => {
 	return {};
 }) satisfies PageServerLoad;
