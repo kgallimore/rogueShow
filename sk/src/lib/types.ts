@@ -1,6 +1,6 @@
 export type WebsocketProxyMessage = {
 	transcribe?: ArrayBuffer;
-	speak?: string;
+	speak?: { text: string; flush?: boolean };
 };
 
 export type WebSocketInitialMessage = {

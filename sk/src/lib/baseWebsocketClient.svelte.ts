@@ -1,7 +1,7 @@
 import type { WebSocketInitialMessage } from './types';
 export abstract class BaseWebsocketClient extends EventTarget {
 	connected = $state(false);
-	socket: WebSocket | null;
+	protected socket: WebSocket | null;
 	constructor(initData: WebSocketInitialMessage) {
 		super();
 		this.socket = new WebSocket(`ws://localhost:24678`);
@@ -23,9 +23,9 @@ export abstract class BaseWebsocketClient extends EventTarget {
 		});
 	}
 
-	abstract handleMessage(websocketMessage: MessageEvent<unknown>): Promise<void>;
+	protected abstract handleMessage(websocketMessage: MessageEvent<unknown>): Promise<void>;
 
-	sendMessage(message: string | ArrayBuffer) {
+	protected sendMessage(message: string | ArrayBuffer) {
 		if (this.socket?.readyState === WebSocket.OPEN) {
 			this.socket.send(message);
 		}

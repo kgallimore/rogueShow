@@ -23,7 +23,7 @@ export function setupWebSocketServer(wss: WSServer, server: ViteDevServer['httpS
 					if (msgData.speak) {
 						if (msgData.speak.type === 'elevenLabs') {
 							messageHandler = new ElevenLabsTTSSocketHandler(
-								msgData.speak.voiceId ?? 'goT3UYdM9bhm0n2lmKQx',
+								msgData.speak.voiceId ?? 'XEC4nrEbSXR7mdELOxaY',
 								ws
 							);
 						} else if (msgData.speak.type === 'deepgram') {
@@ -47,6 +47,7 @@ export function setupWebSocketServer(wss: WSServer, server: ViteDevServer['httpS
 				return;
 			}
 			if (messageHandler) {
+				console.log('Received message:', message.toString());
 				messageHandler.handleMessage(message);
 				return;
 			}

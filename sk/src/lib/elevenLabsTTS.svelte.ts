@@ -4,22 +4,34 @@ import { BaseWebsocketClient } from './baseWebsocketClient.svelte';
 export class ElevenLabsTTS extends BaseWebsocketClient {
 	talking = $state(false);
 	audioPlaying = $state(false);
-	audioChunks: ArrayBuffer[] = [];
+	private audioChunks: ArrayBuffer[] = [];
+	private analyser: AnalyserNode | null = null;
+	private canvas: HTMLCanvasElement | null = null;
 	connected = $state(false);
 	errorMessage = $state('');
 	textInput = $state('');
-	audioContext: AudioContext | null = null;
-	nextPlayTime = 0;
-	scheduledSources: AudioBufferSourceNode[] = [];
-	pcmChunks: ArrayBuffer[] = [];
-	minChunkSize = 24000 * 2 * 0.5; // 0.5 seconds of PCM at 24kHz, 16-bit
-	processingQueue: Promise<void> = Promise.resolve();
+	private audioContext: AudioContext | null = null;
+	private nextPlayTime = 0;
+	private scheduledSources: AudioBufferSourceNode[] = [];
+	private pcmChunks: ArrayBuffer[] = [];
+	private minChunkSize = 24000 * 2 * 0.5; // 0.5 seconds of PCM at 24kHz, 16-bit
+	private processingQueue: Promise<void> = Promise.resolve();
+	private rafId: number | null = null;
+	private isDrawing = false;
 
 	constructor() {
 		super({ speak: { type: 'elevenLabs' } });
 	}
 
-	async handleMessage(event: MessageEvent<unknown>) {
+	setCanvas(canvas: HTMLCanvasElement | null) {
+		this.canvas = canvas;
+		// Start drawing loop immediately if we have a canvas (analyser can be set later)
+		if (this.canvas && !this.isDrawing) {
+			this.startDrawing();
+		}
+	}
+
+	protected async handleMessage(event: MessageEvent<unknown>) {
 		if (typeof event.data === 'string') {
 			const msg = JSON.parse(event.data);
 
@@ -27,7 +39,16 @@ export class ElevenLabsTTS extends BaseWebsocketClient {
 				// Connection opened - initialize audio context
 				if (!this.audioContext) {
 					this.audioContext = new AudioContext();
+					this.analyser = this.audioContext.createAnalyser();
+					this.analyser.fftSize = 2048; // optional tuning
+					this.analyser.smoothingTimeConstant = 0.8;
+					this.analyser.connect(this.audioContext.destination);
 					this.nextPlayTime = this.audioContext.currentTime;
+
+					// Start drawing loop if we have a canvas
+					if (this.canvas && !this.isDrawing) {
+						this.startDrawing();
+					}
 				}
 				this.pcmChunks = [];
 			} else if (msg.type === 'Error') {
@@ -72,7 +93,109 @@ export class ElevenLabsTTS extends BaseWebsocketClient {
 		}
 	}
 
-	async flushPCMChunks() {
+	private startDrawing() {
+		console.log(
+			'startDrawing called, isDrawing:',
+			this.isDrawing,
+			'canvas:',
+			this.canvas,
+			'analyser:',
+			this.analyser
+		);
+		if (this.isDrawing) return; // Already drawing
+		this.isDrawing = true;
+		console.log('Starting draw loop');
+		this.draw();
+	}
+
+	private stopDrawing() {
+		this.isDrawing = false;
+		if (this.rafId !== null) {
+			cancelAnimationFrame(this.rafId);
+			this.rafId = null;
+		}
+	}
+
+	private draw() {
+		// Continue the animation loop first (before any early returns)
+		if (this.isDrawing) {
+			this.rafId = requestAnimationFrame(() => this.draw());
+		}
+
+		if (!this.canvas) {
+			return;
+		}
+
+		const canvasCtx = this.canvas.getContext('2d');
+		if (!canvasCtx) {
+			return;
+		}
+
+		const WIDTH = this.canvas.width;
+		const HEIGHT = this.canvas.height;
+		if (WIDTH === 0 || HEIGHT === 0) {
+			return;
+		}
+
+		// Background
+		canvasCtx.fillStyle = 'rgb(200,200,200)';
+		canvasCtx.fillRect(0, 0, WIDTH, HEIGHT);
+
+		// If no analyser yet, just draw a flat line in the middle
+		if (!this.analyser) {
+			canvasCtx.lineWidth = 2;
+			canvasCtx.strokeStyle = 'rgb(0,0,0)';
+			canvasCtx.beginPath();
+			canvasCtx.moveTo(0, HEIGHT / 2);
+			canvasCtx.lineTo(WIDTH, HEIGHT / 2);
+			canvasCtx.stroke();
+			return;
+		}
+
+		const bufferLength = this.analyser.frequencyBinCount;
+		if (bufferLength === 0) {
+			return;
+		}
+
+		const dataArray = new Uint8Array(bufferLength);
+		this.analyser.getByteTimeDomainData(dataArray);
+
+		// Calculate peak amplitude (0 to 1 range)
+		let peakAmplitude = 0;
+		for (let i = 0; i < bufferLength; i++) {
+			const amplitude = Math.abs((dataArray[i] - 128) / 128.0);
+			peakAmplitude = Math.max(peakAmplitude, amplitude);
+		}
+
+		// Interpolate color from green (0,255,0) to red (255,0,0) based on peak amplitude
+		const red = Math.round(peakAmplitude * 255);
+		const green = Math.round((1 - peakAmplitude) * 255);
+
+		canvasCtx.lineWidth = 2;
+		canvasCtx.strokeStyle = `rgb(${red},${green},0)`;
+		canvasCtx.beginPath();
+
+		const sliceWidth = WIDTH / bufferLength;
+		let x = 0;
+
+		for (let i = 0; i < bufferLength; i++) {
+			// Normalize to -1..1, then map to canvas y with center at HEIGHT/2
+			const v = (dataArray[i] - 128) / 128.0; // -1..1
+			const y = v * (HEIGHT / 2) + HEIGHT / 2;
+
+			if (i === 0) {
+				canvasCtx.moveTo(x, y);
+			} else {
+				canvasCtx.lineTo(x, y);
+			}
+
+			x += sliceWidth;
+		}
+
+		canvasCtx.stroke();
+	}
+
+	private async flushPCMChunks() {
 		if (this.pcmChunks.length === 0) return;
 
 		// Concatenate all PCM chunks
@@ -94,7 +217,7 @@ export class ElevenLabsTTS extends BaseWebsocketClient {
 		await this.playAudioChunk(wavBuffer);
 	}
 
-	createWavFile(
+	private createWavFile(
 		pcmData: Uint8Array,
 		sampleRate: number,
 		channels: number,
@@ -133,10 +256,23 @@ export class ElevenLabsTTS extends BaseWebsocketClient {
 		return wavFile.buffer;
 	}
 
-	async playAudioChunk(chunk: ArrayBuffer) {
+	private async playAudioChunk(chunk: ArrayBuffer) {
+		// Initialize audio context and analyser if needed
 		if (!this.audioContext) {
 			this.audioContext = new AudioContext();
 			this.nextPlayTime = this.audioContext.currentTime;
+		}
+
+		if (!this.analyser) {
+			this.analyser = this.audioContext.createAnalyser();
+			this.analyser.fftSize = 2048;
+			this.analyser.smoothingTimeConstant = 0.8;
+			this.analyser.connect(this.audioContext.destination);
+
+			// Start drawing if we have a canvas
+			if (this.canvas && !this.isDrawing) {
+				this.startDrawing();
+			}
 		}
 
 		try {
@@ -146,7 +282,9 @@ export class ElevenLabsTTS extends BaseWebsocketClient {
 			// Create source
 			const source = this.audioContext.createBufferSource();
 			source.buffer = audioBuffer;
-			source.connect(this.audioContext.destination);
+
+			// Connect to analyser for visualization (analyser is always available now)
+			source.connect(this.analyser);
 
 			// Schedule playback - ensure we never schedule in the past
 			const playTime = Math.max(
@@ -178,10 +316,10 @@ export class ElevenLabsTTS extends BaseWebsocketClient {
 		}
 	}
 
-	sendTTSMessage(text: string) {
+	sendTTSMessage(text: string, end = false) {
 		if (this.socket && this.connected) {
 			const sendMessage: WebsocketProxyMessage = {
-				speak: text
+				speak: { text, flush: end }
 			};
 			this.socket.send(JSON.stringify(sendMessage));
 		} else {
@@ -192,11 +330,13 @@ export class ElevenLabsTTS extends BaseWebsocketClient {
 	sendTTSEnd() {
 		if (this.socket && this.connected) {
 			const sendMessage: WebsocketProxyMessage = {
-				speak: ''
+				speak: { text: '', flush: true }
 			};
 			this.socket.send(JSON.stringify(sendMessage));
 		}
 	}
 
-	onClose() {}
+	onClose() {
+		this.stopDrawing();
+	}
 }

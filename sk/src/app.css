@@ -1,3 +1,9 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
+
+@source inline('text-red-600');
+@source inline('text-yellow-600');
+@source inline('text-blue-600');
+@source inline('text-white');
+@source inline('text-gray-600');

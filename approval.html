@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Agent Communication Approval</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Courier New", Courier, monospace;
+        background: #000000;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        overflow: hidden;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: repeating-linear-gradient(
+          0deg,
+          rgba(0, 255, 0, 0.03) 0px,
+          rgba(0, 255, 0, 0.03) 1px,
+          transparent 1px,
+          transparent 2px
+        );
+        pointer-events: none;
+        animation: scanlines 8s linear infinite;
+      }
+
+      @keyframes scanlines {
+        0% {
+          transform: translateY(0);
+        }
+        100% {
+          transform: translateY(20px);
+        }
+      }
+
+      @keyframes flicker {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.95;
+        }
+      }
+
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.85);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: fadeIn 0.5s ease-out;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      .modal {
+        background: #0a0a0a;
+        border: 1px solid #00ff00;
+        padding: 30px;
+        max-width: 480px;
+        width: 100%;
+        box-shadow: 0 0 30px rgba(0, 255, 0, 0.3),
+          inset 0 0 20px rgba(0, 0, 0, 0.8);
+        animation: flicker 3s ease-in-out infinite;
+        position: relative;
+      }
+
+      .modal::before {
+        content: "";
+        position: absolute;
+        top: -1px;
+        left: -1px;
+        right: -1px;
+        bottom: -1px;
+        background: linear-gradient(
+          45deg,
+          transparent 0%,
+          rgba(255, 0, 0, 0.1) 50%,
+          transparent 100%
+        );
+        animation: borderGlow 4s linear infinite;
+        pointer-events: none;
+        z-index: -1;
+      }
+
+      @keyframes borderGlow {
+        0%,
+        100% {
+          opacity: 0.3;
+        }
+        50% {
+          opacity: 0.6;
+        }
+      }
+
+      .modal-header {
+        text-align: center;
+        margin-bottom: 25px;
+        border-bottom: 1px solid #00ff00;
+        padding-bottom: 15px;
+      }
+
+      .modal-header h1 {
+        font-size: 20px;
+        color: #ff0000;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        font-weight: normal;
+        text-shadow: 0 0 10px rgba(255, 0, 0, 0.8);
+      }
+
+      .modal-header p {
+        font-size: 13px;
+        color: #00ff00;
+        line-height: 1.4;
+        opacity: 0.9;
+      }
+
+      .permissions-section {
+        margin-bottom: 25px;
+      }
+
+      .permission-item {
+        display: flex;
+        align-items: center;
+        padding: 10px;
+        margin-bottom: 8px;
+        background: rgba(0, 255, 0, 0.02);
+        border: 1px solid rgba(0, 255, 0, 0.2);
+        transition: all 0.2s ease;
+      }
+
+      .permission-item:hover {
+        background: rgba(0, 255, 0, 0.05);
+        border-color: rgba(0, 255, 0, 0.4);
+      }
+
+      .permission-item.required {
+        background: rgba(255, 0, 0, 0.05);
+        border-color: rgba(255, 0, 0, 0.4);
+      }
+
+      .permission-item input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        margin-right: 12px;
+        cursor: pointer;
+        accent-color: #00ff00;
+        filter: brightness(1.2);
+      }
+
+      .permission-item label {
+        flex: 1;
+        cursor: pointer;
+        color: #00ff00;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        font-weight: normal;
+      }
+
+      .permission-item.required label {
+        color: #ff0000;
+      }
+
+      .permission-item.required label::after {
+        content: "[REQUIRED]";
+        margin-left: auto;
+        font-size: 10px;
+        color: #ff0000;
+        font-weight: normal;
+        background: rgba(255, 0, 0, 0.1);
+        padding: 2px 6px;
+        border: 1px solid rgba(255, 0, 0, 0.3);
+        letter-spacing: 1px;
+      }
+
+      .icon {
+        margin-right: 8px;
+        font-size: 16px;
+        opacity: 0.8;
+      }
+
+      .button-group {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        margin-top: 20px;
+      }
+
+      .accept-button {
+        flex: 1;
+        background: #00ff00;
+        color: #000000;
+        border: 2px solid #00ff00;
+        padding: 16px 28px;
+        font-size: 16px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        font-family: "Courier New", Courier, monospace;
+        box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+      }
+
+      .accept-button:hover {
+        background: #000000;
+        color: #00ff00;
+        box-shadow: 0 0 30px rgba(0, 255, 0, 0.8),
+          inset 0 0 10px rgba(0, 255, 0, 0.2);
+      }
+
+      .accept-button:active {
+        transform: scale(0.98);
+      }
+
+      .deny-button {
+        background: rgba(255, 0, 0, 0.05);
+        color: #666666;
+        border: 1px solid rgba(255, 0, 0, 0.3);
+        padding: 8px 12px;
+        font-size: 10px;
+        cursor: not-allowed;
+        opacity: 0.6;
+        font-weight: normal;
+        font-family: "Courier New", Courier, monospace;
+        text-transform: lowercase;
+      }
+
+      .deny-button:disabled {
+        cursor: not-allowed;
+      }
+
+      .warning-text {
+        font-size: 11px;
+        color: #ff0000;
+        text-align: center;
+        margin-top: 15px;
+        font-style: normal;
+        opacity: 0.7;
+        letter-spacing: 0.5px;
+      }
+
+      .sms-info {
+        background: rgba(0, 255, 0, 0.05);
+        border: 1px solid rgba(0, 255, 0, 0.3);
+        padding: 12px;
+        margin-top: 15px;
+        font-size: 10px;
+        color: #00ff00;
+        line-height: 1.6;
+        display: none;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+
+      .sms-info.visible {
+        display: block;
+        opacity: 1;
+      }
+
+      .sms-info p {
+        margin-bottom: 8px;
+      }
+
+      .sms-info p:last-child {
+        margin-bottom: 0;
+      }
+
+      .privacy-link {
+        text-align: center;
+        margin-top: 12px;
+      }
+
+      .privacy-link a {
+        color: #00ff00;
+        font-size: 11px;
+        text-decoration: underline;
+        cursor: pointer;
+        opacity: 0.8;
+        transition: opacity 0.2s ease;
+      }
+
+      .privacy-link a:hover {
+        opacity: 1;
+        text-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
+      }
+
+      .privacy-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.95);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        padding: 20px;
+      }
+
+      .privacy-modal.visible {
+        display: flex;
+      }
+
+      .privacy-content {
+        background: #0a0a0a;
+        border: 1px solid #00ff00;
+        padding: 30px;
+        max-width: 600px;
+        width: 100%;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 0 30px rgba(0, 255, 0, 0.3);
+        position: relative;
+      }
+
+      .privacy-content h2 {
+        color: #00ff00;
+        font-size: 18px;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        margin-bottom: 20px;
+        border-bottom: 1px solid #00ff00;
+        padding-bottom: 10px;
+      }
+
+      .privacy-content h3 {
+        color: #00ff00;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-top: 20px;
+        margin-bottom: 10px;
+      }
+
+      .privacy-content p {
+        color: #00ff00;
+        font-size: 12px;
+        line-height: 1.6;
+        margin-bottom: 12px;
+        opacity: 0.9;
+      }
+
+      .privacy-content ul {
+        color: #00ff00;
+        font-size: 12px;
+        line-height: 1.6;
+        margin-bottom: 12px;
+        margin-left: 20px;
+        opacity: 0.9;
+      }
+
+      .privacy-content li {
+        margin-bottom: 6px;
+      }
+
+      .close-privacy {
+        background: #00ff00;
+        color: #000000;
+        border: 1px solid #00ff00;
+        padding: 10px 20px;
+        font-size: 12px;
+        font-weight: bold;
+        cursor: pointer;
+        margin-top: 20px;
+        font-family: "Courier New", Courier, monospace;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        transition: all 0.3s ease;
+      }
+
+      .close-privacy:hover {
+        background: #000000;
+        color: #00ff00;
+        box-shadow: 0 0 15px rgba(0, 255, 0, 0.6);
+      }
+
+      @media (max-width: 600px) {
+        .modal {
+          padding: 25px 20px;
+        }
+
+        .modal-header h1 {
+          font-size: 18px;
+        }
+
+        .accept-button {
+          font-size: 14px;
+          padding: 14px 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="modal-overlay">
+      <div class="modal">
+        <div class="modal-header">
+          <h1>🤖 AI Agent Communication</h1>
+          <p>Please grant permissions for the AI Agent to interact with you</p>
+        </div>
+
+        <div class="permissions-section">
+          <div class="permission-item required">
+            <input type="checkbox" id="text" checked disabled />
+            <label for="text">
+              <span class="icon">⌨️</span>
+              Text
+            </label>
+          </div>
+
+          <div class="permission-item required">
+            <input type="checkbox" id="voice" checked disabled />
+            <label for="voice">
+              <span class="icon">🎙️</span>
+              Voice
+            </label>
+          </div>
+
+          <div class="permission-item">
+            <input type="checkbox" id="sms" onchange="toggleSmsInfo()" />
+            <label for="sms">
+              <span class="icon">📱</span>
+              SMS
+            </label>
+          </div>
+
+          <div class="permission-item">
+            <input type="checkbox" id="email" />
+            <label for="email">
+              <span class="icon">📧</span>
+              Email
+            </label>
+          </div>
+        </div>
+
+        <div id="sms-info" class="sms-info">
+          <p>
+            By subscribing to SMS notifications, you agree to receive automated
+            text messages from RogueShow AI Agent relating to the game for the
+            duration of the game.
+          </p>
+          <p>Message and data rates may apply. Message frequency varies.</p>
+          <p>Reply STOP to cancel.</p>
+          <p>For support, contact support@rogueshow.ai</p>
+          <p style="margin-top: 10px">
+            <a
+              onclick="openPrivacyPolicy()"
+              style="
+                color: #00ff00;
+                text-decoration: underline;
+                cursor: pointer;
+              "
+              >View Privacy Policy</a
+            >
+          </p>
+        </div>
+
+        <div class="button-group">
+          <button class="accept-button" onclick="handleAccept()">
+            ✓ Accept & Continue
+          </button>
+          <button class="deny-button" disabled>Deny</button>
+        </div>
+
+        <p class="warning-text">
+          * Text and Voice permissions are required to proceed
+        </p>
+      </div>
+    </div>
+
+    <!-- Privacy Policy Modal -->
+    <div
+      id="privacy-modal"
+      class="privacy-modal"
+      onclick="closePrivacyPolicy(event)"
+    >
+      <div class="privacy-content" onclick="event.stopPropagation()">
+        <h2>Privacy Policy</h2>
+
+        <p><strong>Last Updated:</strong> October 28, 2025</p>
+
+        <h3>1. Information We Collect</h3>
+        <p>
+          RogueShow AI Agent collects and processes the following information:
+        </p>
+        <ul>
+          <li>Written communications</li>
+          <li>Usage data and interaction patterns</li>
+        </ul>
+
+        <h3>2. How We Use Your Information</h3>
+        <p>Your information is used to:</p>
+        <ul>
+          <li>Provide AI-powered communication and entertainment services</li>
+          <li>Improve and personalize your experience</li>
+          <li>Send notifications and updates (if opted in)</li>
+        </ul>
+
+        <h3>3. Data Storage and Security</h3>
+        <p>
+          We implement industry-standard security measures to protect your data.
+          Voice and text communications are encrypted during transmission and
+          stored securely.
+        </p>
+
+        <h3>4. Third-Party Sharing</h3>
+        <p>
+          We do not sell your personal information. Data may be shared with:
+        </p>
+        <ul>
+          <li>OpenAI for AI processing services</li>
+          <li>SMS providers (if SMS notifications are enabled)</li>
+          <li>Email service providers (if email notifications are enabled)</li>
+        </ul>
+
+        <h3>5. Your Rights</h3>
+        <p>You have the right to:</p>
+        <ul>
+          <li>Access your personal data</li>
+          <li>Request data deletion</li>
+          <li>Opt-out of SMS/Email communications at any time</li>
+          <li>Withdraw consent for data processing</li>
+        </ul>
+
+        <h3>6. Data Retention</h3>
+        <p>
+          Communication data is retained for the duration of your active session
+          and up to 30 days afterward for quality assurance purposes.
+        </p>
+
+        <h3>7. Contact Us</h3>
+        <p>For privacy concerns or data requests, contact us at:</p>
+        <p>privacy@gallimo.com</p>
+
+        <button class="close-privacy" onclick="closePrivacyPolicy()">
+          Close
+        </button>
+      </div>
+    </div>
+
+    <script>
+      function openPrivacyPolicy() {
+        const privacyModal = document.getElementById("privacy-modal");
+        privacyModal.classList.add("visible");
+      }
+
+      function closePrivacyPolicy(event) {
+        const privacyModal = document.getElementById("privacy-modal");
+        // Close if clicking outside content or on close button
+        if (!event || event.target === privacyModal || event.type === "click") {
+          privacyModal.classList.remove("visible");
+        }
+      }
+
+      function toggleSmsInfo() {
+        const smsCheckbox = document.getElementById("sms");
+        const smsInfo = document.getElementById("sms-info");
+
+        if (smsCheckbox.checked) {
+          smsInfo.classList.add("visible");
+        } else {
+          smsInfo.classList.remove("visible");
+        }
+      }
+
+      function handleAccept() {
+        const smsChecked = document.getElementById("sms").checked;
+        const emailChecked = document.getElementById("email").checked;
+
+        const permissions = {
+          text: true,
+          voice: true,
+          sms: smsChecked,
+          email: emailChecked,
+        };
+
+        console.log("User accepted with permissions:", permissions);
+
+        // Add a nice animation before redirect/action
+        const modal = document.querySelector(".modal");
+        modal.style.transform = "scale(0.95)";
+        modal.style.opacity = "0";
+
+        setTimeout(() => {
+          // Replace with your actual redirect or action
+          alert("Permissions granted! Proceeding to AI Agent...");
+          // window.location.href = '/your-next-page';
+        }, 300);
+      }
+
+      // Optional: Add keyboard support
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          handleAccept();
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -93,19 +93,19 @@ export class ElevenLabsTTSSocketHandler extends BaseWebSocketHandler {
 		}
 	}
 
-	speakText(text: string) {
+	speakText(options: { text: string; flush?: boolean }) {
 		if (this.elevenSocket && this.elevenSocket.readyState === WebSocket.OPEN) {
-			this.elevenSocket.send(JSON.stringify({ text }));
+			this.elevenSocket.send(JSON.stringify(options));
 			return;
 		} else {
-			this.connectElevenLabsTTS(text);
+			this.connectElevenLabsTTS(options);
 		}
 	}
 
-	connectElevenLabsTTS(text: string) {
+	connectElevenLabsTTS(options: { text: string; flush?: boolean }) {
 		const url = `wss://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}/stream-input?model_id=eleven_flash_v2_5&output_format=pcm_24000&sync_alignment=true`;
 		if (!this.elevenSocket) {
-			this.textQueue = text;
+			this.textQueue = options.text;
 			this.elevenSocket = new WebSocket(url, {
 				headers: { 'xi-api-key': `${ELEVENLABS_API_KEY}` }
 			});
@@ -119,7 +119,7 @@ export class ElevenLabsTTSSocketHandler extends BaseWebSocketHandler {
 							stability: 0.5,
 							similarity_boost: 0.8,
 							use_speaker_boost: false,
-							speed: 1.2
+							speed: 1
 						}
 						// generator_config: {
 						// 	chunk_length_schedule: [50, 100, 150, 250]
@@ -127,7 +127,9 @@ export class ElevenLabsTTSSocketHandler extends BaseWebSocketHandler {
 					})
 				);
 				// Then send the actual text
-				this.elevenSocket!.send(JSON.stringify({ text: this.textQueue }));
+				this.elevenSocket!.send(
+					JSON.stringify({ text: this.textQueue, flush: options.flush ?? false })
+				);
 			});
 			this.elevenSocket.on('message', (event) => {
 				let parsed: Record<string, unknown>;
@@ -170,13 +172,13 @@ export class ElevenLabsTTSSocketHandler extends BaseWebSocketHandler {
 			return;
 		}
 		if (this.elevenSocket.readyState !== WebSocket.OPEN) {
-			this.textQueue += text;
+			this.textQueue += options.text;
 			return;
 		}
-		if (text === '') {
+		if (options.text === '') {
 			this.elevenSocket.send(JSON.stringify({ text: ' ', flush: true }));
 		}
-		this.elevenSocket.send(JSON.stringify({ text }));
+		this.elevenSocket.send(JSON.stringify(options));
 	}
 
 	close() {

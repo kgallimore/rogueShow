@@ -96,12 +96,7 @@
 				return;
 			}
 			const sendMessage: WebsocketProxyMessage = {
-				speak: {
-					text: textInput,
-					deepgram: {
-						model: 'aura-2-thalia-en'
-					}
-				}
+				speak: textInput
 			};
 			socket.send(JSON.stringify(sendMessage));
 		} else {
