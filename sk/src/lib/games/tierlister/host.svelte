@@ -6,19 +6,19 @@
 		ReesesProductsResponse,
 		TiersResponse,
 		GameStateResponse,
-		TypedPocketBase
+		TypedPocketBase,
+		ReesesVotesResponse
 	} from '$lib/pocketbase/types';
+	import { tierOrder, getTierStyle, type TierLetter } from './tiers';
+	import { goto } from '$app/navigation';
 
-	type TierLetter = 'S' | 'A' | 'B' | 'C' | 'D' | 'F';
 	type TLProduct = {
 		id: string;
 		name: string;
 		imageUrl: string | null;
-		tierId: string | null;
 		tier: TierLetter | null;
+		order: number;
 	};
-
-	const tierOrder: TierLetter[] = ['S', 'A', 'B', 'C', 'D', 'F'];
 
 	const [send, receive] = crossfade({
 		duration: (d) => Math.min(600, Math.max(250, d / 2)),
@@ -26,88 +26,86 @@
 	});
 
 	let products = $state<TLProduct[]>([]);
-	let queue = $state<TLProduct[]>([]);
-	let current: TLProduct | null = $state(null);
-	let placed = $state<Record<TierLetter, TLProduct[]>>({
-		S: [],
-		A: [],
-		B: [],
-		C: [],
-		D: [],
-		F: []
-	});
 	let loading = $state(true);
 	let advancing = $state(false);
-	let interactionEnabled = $state<boolean>(true);
+	let gameState = $state<GameStateResponse | null>(null);
+	let previousProductNum = $state<number>(0);
+	let votes = $state<ReesesVotesResponse[]>([]);
 
 	let pb: TypedPocketBase | null = null;
-	let gameStateId: string | null = null;
-	let unsubGameState: null | (() => void) = null;
-	let unsubProducts: null | (() => void) = null;
-
-	// Confetti state
+	let unsubGameState: (() => void) | null = null;
+	let unsubVotes: (() => void) | null = null;
+	let tiers = $state<TiersResponse[]>([]);
 	let confettiCanvas: HTMLCanvasElement | null = $state(null);
 
-	function rankToLetter(rank: string): TierLetter | null {
+	const getVoteCount = (tierLetter: TierLetter) => {
+		const tierRecord = tiers.find((t) => t.Rank === tierLetter);
+		return tierRecord ? votes.filter((v) => v.tier === tierRecord.id).length : 0;
+	};
+
+	const rankToLetter = (rank: string): TierLetter | null => {
 		const r = rank.trim().toUpperCase();
 		return ['S', 'A', 'B', 'C', 'D', 'F'].includes(r) ? (r as TierLetter) : null;
-	}
+	};
 
-	function keyObj(id: string | null) {
-		return { key: id };
-	}
+	const keyObj = (id: string | null) => ({ key: id });
 
-	function triggerConfetti() {
+	const currentProduct = $derived(
+		products.find((p) => p.order === gameState?.currentProductNum) ?? null
+	);
+
+	const placedProducts = $derived(
+		products.filter((p) => p.tier && p.order < (gameState?.currentProductNum ?? 0))
+	);
+
+	const unplacedProducts = $derived(
+		products.filter((p) => p.order >= (gameState?.currentProductNum ?? 0))
+	);
+
+	const getPlacedByTier = (tier: TierLetter) => placedProducts.filter((p) => p.tier === tier);
+
+	const toUrl = (rec: ReesesProductsResponse) => {
+		const img = rec.image?.[0];
+		if (!img || !pb) return null;
+		try {
+			return pb.files.getURL(rec, img);
+		} catch {
+			const base = pb.baseURL ?? 'http://127.0.0.1:8090';
+			return `${base}/api/files/${rec.collectionId}/${rec.id}/${encodeURIComponent(img)}`;
+		}
+	};
+
+	const triggerConfetti = () => {
 		if (!confettiCanvas) return;
-
 		const ctx = confettiCanvas.getContext('2d');
 		if (!ctx) return;
 
 		const colors = ['#ff6b6b', '#ffd166', '#06ffa5', '#6b9eff', '#a78bfa', '#f97316'];
-		const confettiCount = 100;
-		const particles: Array<{
-			x: number;
-			y: number;
-			vx: number;
-			vy: number;
-			color: string;
-			size: number;
-			rotation: number;
-			rotationSpeed: number;
-		}> = [];
+		const canvas = confettiCanvas; // Capture for closure
+		const particles = Array.from({ length: 100 }, () => ({
+			x: canvas.width / 2,
+			y: canvas.height / 2,
+			vx: (Math.random() - 0.5) * 15,
+			vy: (Math.random() - 0.5) * 15 - 5,
+			color: colors[Math.floor(Math.random() * colors.length)],
+			size: Math.random() * 8 + 4,
+			rotation: Math.random() * 360,
+			rotationSpeed: (Math.random() - 0.5) * 10
+		}));
 
-		// Create particles
-		for (let i = 0; i < confettiCount; i++) {
-			particles.push({
-				x: confettiCanvas.width / 2,
-				y: confettiCanvas.height / 2,
-				vx: (Math.random() - 0.5) * 15,
-				vy: (Math.random() - 0.5) * 15 - 5,
-				color: colors[Math.floor(Math.random() * colors.length)],
-				size: Math.random() * 8 + 4,
-				rotation: Math.random() * 360,
-				rotationSpeed: (Math.random() - 0.5) * 10
-			});
-		}
-
-		// animation frame id is intentionally not stored
-		const gravity = 0.5;
 		const startTime = Date.now();
 		const duration = 3000;
+		const gravity = 0.05;
 
-		function animate() {
-			if (!confettiCanvas || !ctx) return;
-
-			const elapsed = Date.now() - startTime;
-			if (elapsed > duration) {
-				ctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+		const animate = () => {
+			if (!canvas || !ctx || Date.now() - startTime > duration) {
+				ctx?.clearRect(0, 0, canvas?.width ?? 0, canvas?.height ?? 0);
 				return;
 			}
 
-			ctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
-
+			ctx.clearRect(0, 0, canvas.width, canvas.height);
 			particles.forEach((p) => {
-				p.vy += gravity * 0.1;
+				p.vy += gravity;
 				p.x += p.vx;
 				p.y += p.vy;
 				p.rotation += p.rotationSpeed;
@@ -119,250 +117,116 @@
 				ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
 				ctx.restore();
 			});
-
 			requestAnimationFrame(animate);
-		}
-
+		};
 		animate();
-	}
+	};
 
 	onMount(async () => {
 		loading = true;
 		try {
 			pb = getPocketBase();
 
-			// Load tiers and build map id -> letter
-			const tiers = await pb.collection('tiers').getFullList<TiersResponse>({ batch: 200 });
-			// Using a Map here is fine; disable the Svelte reactivity recommendation for this local helper
-			// eslint-disable-next-line svelte/prefer-svelte-reactivity
-			const tierMap = new Map<string, TierLetter>();
-			for (const t of tiers) {
-				const letter = rankToLetter(t.Rank);
-				if (letter) tierMap.set(t.id, letter);
+			if (!pb.authStore.isValid) {
+				// eslint-disable-next-line svelte/no-navigation-without-resolve
+				await goto('/login');
+				return;
 			}
 
-			// Load all products
-			const raw = await pb
-				.collection('reesesProducts')
-				.getFullList<ReesesProductsResponse>({ batch: 200 });
+			const [tiers, rawProducts, gs, reesesVotes] = await Promise.all([
+				pb.collection('tiers').getFullList<TiersResponse>({ batch: 200 }),
+				pb
+					.collection('reesesProducts')
+					.getFullList<ReesesProductsResponse>({ batch: 200, sort: 'order' }),
+				pb.collection('gameState').getFirstListItem<GameStateResponse>(''),
+				pb
+					.collection('reesesVotes')
+					.getFullList<ReesesVotesResponse>({ batch: 200, expand: 'product,user,tier' })
+			]);
+			console.log('Fetched tiers, products, and game state:', { tiers, rawProducts, gs, votes });
+			votes = reesesVotes;
+			gameState = gs;
 
-			const toUrl = (rec: ReesesProductsResponse) => {
-				const img = rec.image?.[0];
-				if (!img) return null;
-				try {
-					return pb!.files.getURL(rec, img);
-				} catch {
-					const base = pb?.baseURL ?? 'http://127.0.0.1:8090';
-					return `${base}/api/files/${rec.collectionId}/${rec.id}/${encodeURIComponent(img)}`;
-				}
-			};
+			const tierMap = new Map(
+				tiers.map((t) => [t.id, rankToLetter(t.Rank)]).filter(([/* unused */, letter]) => letter) as Array<
+					[string, TierLetter]
+				>
+			);
 
-			products = raw.map((p) => ({
+			products = rawProducts.map((p) => ({
 				id: p.id,
 				name: p.name,
 				imageUrl: toUrl(p),
-				tierId: p.tier ?? null,
+				order: p.order,
 				tier: p.tier ? (tierMap.get(p.tier) ?? null) : null
 			}));
-			console.log($state.snapshot(products));
 
-			// Initialize placed items based on the new `placed` field on products
-			// Any product with placed === true should already be on the table and
-			// must be excluded from the active queue.
-			// eslint-disable-next-line svelte/prefer-svelte-reactivity
-			const initialPlacedIds = new Set<string>();
-			for (const rec of raw) {
-				if (rec.placed) {
-					const prod = products.find((p) => p.id === rec.id);
-					if (prod) {
-						const tier: TierLetter = (prod.tier ?? 'F') as TierLetter;
-						placed[tier] = [...placed[tier], prod];
-						initialPlacedIds.add(prod.id);
+			previousProductNum = gs.currentProductNum;
+
+			unsubGameState = subscribeToCollection<GameStateResponse>(
+				'gameState',
+				'*',
+				async ({ record }) => {
+					const prevNum = gameState?.currentProductNum ?? 0;
+					gameState = record;
+
+					// If product changed and it's moving forward, trigger confetti
+					if (record.currentProductNum > prevNum && record.currentProductNum > previousProductNum) {
+						triggerConfetti();
+
+						// Wait for animation before marking as ready for next
+						await tick();
+						await new Promise((r) => setTimeout(r, 450));
+						previousProductNum = record.currentProductNum;
+						advancing = false;
 					}
 				}
-			}
+			);
 
-			// Load game state (assume single row)
-			const gsList = await pb.collection('gameState').getFullList<GameStateResponse>({ batch: 1 });
-			if (gsList.length) {
-				const gs = gsList[0]!;
-				gameStateId = gs.id;
-				interactionEnabled = !!gs.interactionEnabled;
-				// If a current product is already set, reflect it
-				const curProd = products.find((p) => p.id === gs.currentProduct);
-				// If the current product is already marked placed, ignore it here
-				if (curProd && !initialPlacedIds.has(curProd.id)) {
-					current = curProd;
-				}
-			}
-
-			// Build initial queue (with-tier first), excluding any already-placed items
-			const unplaced = products.filter((p) => !initialPlacedIds.has(p.id));
-			const withTier = unplaced.filter((p) => p.tier);
-			const withoutTier = unplaced.filter((p) => !p.tier);
-			queue = [...withTier, ...withoutTier];
-
-			if (!current) {
-				await showNext();
-			}
-
-			// Live subscriptions
-			unsubGameState = subscribeToCollection('gameState', '*', ({ record }) => {
-				const r = record as unknown as GameStateResponse;
-				interactionEnabled = !!r.interactionEnabled;
-				if (r.currentProduct) {
-					const next = products.find((p) => p.id === r.currentProduct) ?? null;
-					if (next && (!current || next.id !== current.id)) {
-						// Rebuild queue so that 'next' is first among unplaced items
-						const placedIds = new Set(
-							(['S', 'A', 'B', 'C', 'D', 'F'] as TierLetter[]).flatMap((t) =>
-								placed[t].map((x) => x.id)
-							)
-						);
-						const remaining = products.filter((p) => !placedIds.has(p.id) && p.id !== next.id);
-						queue = [next, ...remaining];
-						current = next;
+			// Subscribe to votes for real-time updates
+			unsubVotes = subscribeToCollection<ReesesVotesResponse>(
+				'reesesVotes',
+				'*',
+				({ record, action }) => {
+					if (action === 'delete') {
+						votes = votes.filter((v) => v.id !== record.id);
+					} else if (action === 'create') {
+						votes = [...votes, record];
+					} else if (action === 'update') {
+						votes = votes.map((v) => (v.id === record.id ? record : v));
 					}
 				}
-			});
-
-			// Keep product data in sync (tier or image/name changes)
-			unsubProducts = subscribeToCollection('reesesProducts', '*', ({ record }) => {
-				const rec = record as unknown as ReesesProductsResponse;
-				const idx = products.findIndex((p) => p.id === rec.id);
-				if (idx >= 0) {
-					const img = rec.image?.[0];
-					let imageUrl: string | null = products[idx].imageUrl;
-					if (img) {
-						try {
-							imageUrl = pb!.files.getURL(rec, img);
-						} catch {
-							const base = pb?.baseURL ?? 'http://127.0.0.1:8090';
-							imageUrl = `${base}/api/files/${rec.collectionId}/${rec.id}/${encodeURIComponent(img)}`;
-						}
-					}
-
-					// Track placed toggles
-					const newPlaced = !!rec.placed;
-					let prevPlacedTier: TierLetter | null = null;
-					(['S', 'A', 'B', 'C', 'D', 'F'] as TierLetter[]).forEach((t) => {
-						if (placed[t].some((x) => x.id === rec.id)) prevPlacedTier = t;
-					});
-
-					products[idx] = {
-						...products[idx],
-						name: rec.name,
-						tierId: rec.tier ?? null,
-						imageUrl
-					};
-
-					const updated = products[idx];
-
-					// If the record became placed (and wasn't before), add to placed and remove from queue/current
-					if (newPlaced && !prevPlacedTier) {
-						const tierLetter: TierLetter = (updated.tier ?? 'F') as TierLetter;
-						placed[tierLetter] = [...placed[tierLetter], updated];
-						queue = queue.filter((q) => q.id !== updated.id);
-						if (current && current.id === updated.id) {
-							current = null;
-							// show next if available
-							showNext();
-						}
-					}
-
-					// If the record was unplaced (and was previously placed), remove and requeue
-					if (!newPlaced && prevPlacedTier) {
-						const fromTier = prevPlacedTier as TierLetter;
-						placed[fromTier] = placed[fromTier].filter((x) => x.id !== updated.id);
-						// avoid duplicates
-						const inQueue = queue.some((q) => q.id === updated.id);
-						if (!inQueue && !(current && current.id === updated.id)) {
-							if (updated.tier) {
-								queue = [updated, ...queue];
-							} else {
-								queue = [...queue, updated];
-							}
-							if (!current) showNext();
-						}
-					}
-
-					// If placed and tier changed, move to the new tier
-					if (newPlaced && prevPlacedTier && prevPlacedTier !== (updated.tier ?? 'F')) {
-						const fromTier = prevPlacedTier as TierLetter;
-						placed[fromTier] = placed[fromTier].filter((x) => x.id !== updated.id);
-						const newTier: TierLetter = (updated.tier ?? 'F') as TierLetter;
-						placed[newTier] = [...placed[newTier], updated];
-					}
-
-					// Keep UI copies in sync
-					if (current && current.id === rec.id) current = updated;
-					queue = queue.map((q) => (q.id === rec.id ? updated : q));
-					(['S', 'A', 'B', 'C', 'D', 'F'] as TierLetter[]).forEach((t) => {
-						placed[t] = placed[t].map((q) => (q.id === rec.id ? updated : q));
-					});
-				}
-			});
+			);
 		} finally {
 			loading = false;
 		}
 	});
 
 	onDestroy(() => {
-		if (unsubGameState) unsubGameState();
-		if (unsubProducts) unsubProducts();
+		unsubGameState?.();
+		unsubVotes?.();
 	});
 
-	async function showNext() {
-		if (!queue.length) {
-			current = null;
-			return;
-		}
-		current = queue[0]!;
-		// Update game state: set current product and enable interaction
-		try {
-			if (pb && gameStateId) {
-				await pb.collection('gameState').update(gameStateId, {
-					currentProduct: current.id,
-					interactionEnabled: true
-				});
-				interactionEnabled = true;
-			}
-		} catch (e) {
-			console.error('Failed to set current product', e);
-		}
-	}
+	const advance = async () => {
+		if (advancing || !pb || !gameState?.id) return;
 
-	async function advance() {
-		if (!current || advancing) return;
 		advancing = true;
 		try {
-			// Trigger confetti!
-			triggerConfetti();
-
-			// Disable interaction in game state
-			if (pb && gameStateId) {
-				await pb.collection('gameState').update(gameStateId, { interactionEnabled: false });
-				await pb.collection('reesesProducts').update(current.id, { placed: true });
-
-				interactionEnabled = false;
+			if (!gameState.interactionEnabled && gameState.currentProductNum > 0) {
+				await pb.collection('gameState').update(gameState.id, {
+					interactionEnabled: false
+				});
+			} else {
+				await pb.collection('gameState').update(gameState.id, {
+					interactionEnabled: true,
+					currentProductNum: gameState.currentProductNum + 1
+				});
 			}
-
-			// Move current item into its tier to trigger crossfade
-			const tier: TierLetter = (current.tier ?? 'F') as TierLetter;
-			placed[tier] = [...placed[tier], current];
-
-			// Remove from queue and clear current to let it out:send
-			queue = queue.slice(1);
-			current = null;
-
-			// Wait a bit for the crossfade to complete before showing next
-			await tick();
-			await new Promise((r) => setTimeout(r, 450));
-			await showNext();
-		} finally {
+		} catch (e) {
+			console.error('Failed to advance product', e);
 			advancing = false;
 		}
-	}
+	};
 </script>
 
 <div class="relative mx-auto max-w-6xl space-y-6 p-6">
@@ -387,7 +251,9 @@
 	<h1
 		class="bg-linear-to-r from-rose-500 via-amber-400 to-indigo-600 bg-clip-text text-center text-4xl font-extrabold text-transparent drop-shadow-lg"
 	>
-		<span class="font-bold">{interactionEnabled ? 'VOTING TIME' : 'SHUT UP AND LISTEN'}</span>
+		<span class="font-bold"
+			>{gameState?.interactionEnabled ? 'VOTING TIME' : 'SHUT UP AND LISTEN'}</span
+		>
 	</h1>
 
 	{#if loading}
@@ -397,10 +263,11 @@
 	{:else}
 		<!-- Staging area: show the current product above the list -->
 		<div class="relative">
-			{#if current}
+
+			{#snippet currentCard(product: TLProduct)}
 				<div
 					class="relative mx-auto flex w-full max-w-2xl items-center gap-4 overflow-hidden rounded-2xl bg-white/80 p-5 shadow-2xl ring-1 ring-white/30 backdrop-blur-md"
-					out:send={keyObj(current?.id)}
+					out:send={keyObj(product?.id ?? null)}
 				>
 					<!-- playful neon frame -->
 					<div
@@ -408,30 +275,24 @@
 						style="background:linear-gradient(90deg,#ff6b6b,#ffd166,#6b9eff);filter:blur(12px);z-index:0"
 					></div>
 					<img
-						src={current.imageUrl ?? ''}
-						alt={current.name}
+						src={product.imageUrl ?? ''}
+						alt={product.name}
 						class="relative z-10 h-28 w-28 flex-none transform rounded-2xl object-cover shadow-lg transition-all hover:scale-105 hover:-rotate-2"
 						onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = 'hidden')}
 					/>
 					<div class="z-10 min-w-0">
-						<div class="truncate text-xl font-extrabold text-slate-900">{current.name}</div>
-					</div>
-					<div class="z-10 ml-auto flex items-center gap-3">
-						<button
-							class="relative inline-flex transform items-center gap-2 rounded-full bg-linear-to-r from-emerald-400 to-teal-500 px-5 py-2 font-bold text-white shadow-xl transition hover:-translate-y-1 hover:scale-105 disabled:opacity-60"
-							onclick={advance}
-							disabled={advancing}
-						>
-							<span class="text-lg">🚀</span>
-							<span>Advance</span>
-						</button>
+						<div class="truncate text-xl font-extrabold text-slate-900">{product.name}</div>
 					</div>
 				</div>
+			{/snippet}
+
+			{#if currentProduct}
+				{@render currentCard(currentProduct)}
 			{:else}
 				<div
 					class="mx-auto flex w-full max-w-2xl items-center justify-center rounded-xl bg-white/70 p-6 text-slate-700 shadow-inner"
 				>
-					{#if queue.length === 0}
+					{#if unplacedProducts.length === 0}
 						<div class="flex items-center gap-3">
 							<div class="text-2xl">🎉</div>
 							<div class="text-lg font-semibold">All items placed.</div>
@@ -449,23 +310,27 @@
 		<!-- Tier list -->
 		<div class="grid space-y-4">
 			{#each tierOrder as letter (letter)}
+				{@const style = getTierStyle(letter)}
+				{@const tierProducts = getPlacedByTier(letter)}
 				<div class="grid grid-cols-[96px_1fr] items-start gap-4">
 					<div
 						class="relative z-10 flex h-full items-center justify-center rounded-lg px-3 py-4 text-2xl font-extrabold text-white"
-						style="background:linear-gradient(180deg,var(--from),var(--to));"
 					>
 						<div
 							class="flex h-16 w-16 items-center justify-center rounded-lg text-3xl shadow-lg"
-							style="background:linear-gradient(135deg, var(--c1), var(--c2));"
+							style="background:linear-gradient(135deg, {style.gradient.from}, {style.gradient
+								.to});"
 						>
+							{getVoteCount(letter)}
 							{letter}
 						</div>
 					</div>
 					<div
-						class="min-h-24 rounded-2xl bg-linear-to-b from-white/60 to-slate-100/40 p-3 shadow-inner ring-1 ring-white/60"
+						class="min-h-24 rounded-2xl p-3 shadow-inner ring-1 ring-white/60"
+						style="background: linear-gradient(to bottom, {style.bg}cc, {style.bg}66);"
 					>
 						<div class="flex flex-wrap gap-3">
-							{#each placed[letter] as item (item.id)}
+							{#each tierProducts as item (item.id)}
 								<div
 									class="relative z-10 flex transform items-center gap-3 rounded-lg bg-white p-3 shadow-md ring-1 ring-slate-200 transition hover:scale-105 hover:rotate-1"
 									in:receive={keyObj(item.id)}
@@ -523,31 +388,5 @@
 	}
 	:global(.hover\:wiggle:hover) {
 		animation: wiggle 200ms linear;
-	}
-
-	/* simple palette per row using nth-child (kept intentionally small) */
-	:global(.grid) > :nth-child(1) div[style] {
-		--c1: #ffb86b;
-		--c2: #ff6b6b;
-	}
-	:global(.grid) > :nth-child(2) div[style] {
-		--c1: #f97316;
-		--c2: #f59e0b;
-	}
-	:global(.grid) > :nth-child(3) div[style] {
-		--c1: #60a5fa;
-		--c2: #3b82f6;
-	}
-	:global(.grid) > :nth-child(4) div[style] {
-		--c1: #34d399;
-		--c2: #10b981;
-	}
-	:global(.grid) > :nth-child(5) div[style] {
-		--c1: #a78bfa;
-		--c2: #7c3aed;
-	}
-	:global(.grid) > :nth-child(6) div[style] {
-		--c1: #94a3b8;
-		--c2: #64748b;
 	}
 </style>

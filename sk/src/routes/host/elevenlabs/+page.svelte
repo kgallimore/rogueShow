@@ -13,14 +13,14 @@
 	onMount(() => {
 		tts = new ElevenLabsTTS();
 	});
-	
+
 	// Set canvas when it becomes available
 	$effect(() => {
 		if (tts && canvas) {
 			tts.setCanvas(canvas);
 		}
 	});
-	
+
 	onDestroy(() => {
 		if (tts) {
 			tts.close();

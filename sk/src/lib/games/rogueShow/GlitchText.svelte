@@ -9,7 +9,7 @@
 	let glitching = $state(true);
 	let displayText = $state(text);
 	let glitchChars = '!@#$%^&*()_+-=[]{}|;:,.<>?/~`';
-    let duration = 6000;
+	let duration = 6000;
 
 	// Randomly glitch characters
 	$effect(() => {
@@ -44,26 +44,25 @@
 	$effect(() => {
 		const timer = setTimeout(() => {
 			glitching = false;
-			displayText = "Everything is okay :)";
-            setTimeout(() => {
-                if (displayText.length > 0){
-                    deleteChar();
-                    return;
-                }
-                onComplete?.();
-            }, 1000);
-			
+			displayText = 'Everything is okay :)';
+			setTimeout(() => {
+				if (displayText.length > 0) {
+					deleteChar();
+					return;
+				}
+				onComplete?.();
+			}, 1000);
 		}, duration);
 
 		return () => clearTimeout(timer);
 	});
 
-    function deleteChar() {
-        if (displayText.length > 0) {
-            displayText = displayText.slice(0, -1);
-            setTimeout(deleteChar, 100 * (Math.random() + .2)); // Adjust speed of deletion here
-        }
-    }
+	function deleteChar() {
+		if (displayText.length > 0) {
+			displayText = displayText.slice(0, -1);
+			setTimeout(deleteChar, 100 * (Math.random() + 0.2)); // Adjust speed of deletion here
+		}
+	}
 </script>
 
 <div class="glitch-container" class:active={glitching}>
@@ -92,7 +91,9 @@
 			0.05em 0 0 rgba(255, 0, 0, 0.75),
 			-0.025em -0.05em 0 rgba(0, 255, 0, 0.75),
 			0.025em 0.05em 0 rgba(0, 0, 255, 0.75);
-		animation: glitch 500ms infinite, letterShift 150ms infinite;
+		animation:
+			glitch 500ms infinite,
+			letterShift 150ms infinite;
 	}
 
 	.glitch-text::before,
