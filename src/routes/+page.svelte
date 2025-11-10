@@ -18,13 +18,13 @@
 			<h2 class="mb-4 flex items-center gap-2 text-2xl font-bold text-orange-700">
 				<span>🎉</span>
 				<span>Audience Voters</span>
-				<span class="text-sm font-normal text-gray-500">({data.users.length})</span>
+				<span class="text-sm font-normal text-gray-500"></span>
 			</h2>
 
 			<div class="grid grid-cols-2 gap-3">
-				{#each data.users as user}
+				{#each [] as user}
 					<a
-						href={`/player/${user.name}`}
+						href={`/player/${user}`}
 						class="rounded-xl border-2 border-orange-200 bg-linear-to-r from-orange-100
 						       to-amber-100 p-4
 						       shadow-sm transition-all hover:border-orange-400
@@ -34,7 +34,7 @@
 							<div class="text-3xl">🙋</div>
 							<div class="min-w-0 flex-1">
 								<p class="truncate font-semibold text-gray-800">
-									{user.name}
+									{user}
 								</p>
 								<p class="text-xs text-gray-500">Tap to sign in</p>
 							</div>
