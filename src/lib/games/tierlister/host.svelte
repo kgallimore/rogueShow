@@ -1,13 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { crossfade } from 'svelte/transition';
-	import { getPocketBase, subscribeToCollection } from '$lib/pocketbase/client.svelte';
-	import type {
-		ReesesProductsResponse,
-		TiersResponse,
-		GameStateResponse,
-		TypedPocketBase
-	} from '$lib/pocketbase/types';
 
 	type TierLetter = 'S' | 'A' | 'B' | 'C' | 'D' | 'F';
 	type TLProduct = {
@@ -40,7 +33,6 @@
 	let advancing = $state(false);
 	let interactionEnabled = $state<boolean>(true);
 
-	let pb: TypedPocketBase | null = null;
 	let gameStateId: string | null = null;
 	let unsubGameState: null | (() => void) = null;
 	let unsubProducts: null | (() => void) = null;
@@ -126,226 +118,19 @@
 		animate();
 	}
 
-	onMount(async () => {
-		loading = true;
-		try {
-			pb = getPocketBase();
-
-			// Load tiers and build map id -> letter
-			const tiers = await pb.collection('tiers').getFullList<TiersResponse>({ batch: 200 });
-			// Using a Map here is fine; disable the Svelte reactivity recommendation for this local helper
-			// eslint-disable-next-line svelte/prefer-svelte-reactivity
-			const tierMap = new Map<string, TierLetter>();
-			for (const t of tiers) {
-				const letter = rankToLetter(t.Rank);
-				if (letter) tierMap.set(t.id, letter);
-			}
-
-			// Load all products
-			const raw = await pb
-				.collection('reesesProducts')
-				.getFullList<ReesesProductsResponse>({ batch: 200 });
-
-			const toUrl = (rec: ReesesProductsResponse) => {
-				const img = rec.image?.[0];
-				if (!img) return null;
-				try {
-					return pb!.files.getURL(rec, img);
-				} catch {
-					const base = pb?.baseURL ?? 'http://127.0.0.1:8090';
-					return `${base}/api/files/${rec.collectionId}/${rec.id}/${encodeURIComponent(img)}`;
-				}
-			};
-
-			products = raw.map((p) => ({
-				id: p.id,
-				name: p.name,
-				imageUrl: toUrl(p),
-				tierId: p.tier ?? null,
-				tier: p.tier ? (tierMap.get(p.tier) ?? null) : null
-			}));
-			console.log($state.snapshot(products));
-
-			// Initialize placed items based on the new `placed` field on products
-			// Any product with placed === true should already be on the table and
-			// must be excluded from the active queue.
-			// eslint-disable-next-line svelte/prefer-svelte-reactivity
-			const initialPlacedIds = new Set<string>();
-			for (const rec of raw) {
-				if (rec.placed) {
-					const prod = products.find((p) => p.id === rec.id);
-					if (prod) {
-						const tier: TierLetter = (prod.tier ?? 'F') as TierLetter;
-						placed[tier] = [...placed[tier], prod];
-						initialPlacedIds.add(prod.id);
-					}
-				}
-			}
-
-			// Load game state (assume single row)
-			const gsList = await pb.collection('gameState').getFullList<GameStateResponse>({ batch: 1 });
-			if (gsList.length) {
-				const gs = gsList[0]!;
-				gameStateId = gs.id;
-				interactionEnabled = !!gs.interactionEnabled;
-				// If a current product is already set, reflect it
-				const curProd = products.find((p) => p.id === gs.currentProduct);
-				// If the current product is already marked placed, ignore it here
-				if (curProd && !initialPlacedIds.has(curProd.id)) {
-					current = curProd;
-				}
-			}
-
-			// Build initial queue (with-tier first), excluding any already-placed items
-			const unplaced = products.filter((p) => !initialPlacedIds.has(p.id));
-			const withTier = unplaced.filter((p) => p.tier);
-			const withoutTier = unplaced.filter((p) => !p.tier);
-			queue = [...withTier, ...withoutTier];
-
-			if (!current) {
-				await showNext();
-			}
-
-			// Live subscriptions
-			unsubGameState = subscribeToCollection('gameState', '*', ({ record }) => {
-				const r = record as unknown as GameStateResponse;
-				interactionEnabled = !!r.interactionEnabled;
-				if (r.currentProduct) {
-					const next = products.find((p) => p.id === r.currentProduct) ?? null;
-					if (next && (!current || next.id !== current.id)) {
-						// Rebuild queue so that 'next' is first among unplaced items
-						const placedIds = new Set(
-							(['S', 'A', 'B', 'C', 'D', 'F'] as TierLetter[]).flatMap((t) =>
-								placed[t].map((x) => x.id)
-							)
-						);
-						const remaining = products.filter((p) => !placedIds.has(p.id) && p.id !== next.id);
-						queue = [next, ...remaining];
-						current = next;
-					}
-				}
-			});
-
-			// Keep product data in sync (tier or image/name changes)
-			unsubProducts = subscribeToCollection('reesesProducts', '*', ({ record }) => {
-				const rec = record as unknown as ReesesProductsResponse;
-				const idx = products.findIndex((p) => p.id === rec.id);
-				if (idx >= 0) {
-					const img = rec.image?.[0];
-					let imageUrl: string | null = products[idx].imageUrl;
-					if (img) {
-						try {
-							imageUrl = pb!.files.getURL(rec, img);
-						} catch {
-							const base = pb?.baseURL ?? 'http://127.0.0.1:8090';
-							imageUrl = `${base}/api/files/${rec.collectionId}/${rec.id}/${encodeURIComponent(img)}`;
-						}
-					}
-
-					// Track placed toggles
-					const newPlaced = !!rec.placed;
-					let prevPlacedTier: TierLetter | null = null;
-					(['S', 'A', 'B', 'C', 'D', 'F'] as TierLetter[]).forEach((t) => {
-						if (placed[t].some((x) => x.id === rec.id)) prevPlacedTier = t;
-					});
-
-					products[idx] = {
-						...products[idx],
-						name: rec.name,
-						tierId: rec.tier ?? null,
-						imageUrl
-					};
-
-					const updated = products[idx];
-
-					// If the record became placed (and wasn't before), add to placed and remove from queue/current
-					if (newPlaced && !prevPlacedTier) {
-						const tierLetter: TierLetter = (updated.tier ?? 'F') as TierLetter;
-						placed[tierLetter] = [...placed[tierLetter], updated];
-						queue = queue.filter((q) => q.id !== updated.id);
-						if (current && current.id === updated.id) {
-							current = null;
-							// show next if available
-							showNext();
-						}
-					}
-
-					// If the record was unplaced (and was previously placed), remove and requeue
-					if (!newPlaced && prevPlacedTier) {
-						const fromTier = prevPlacedTier as TierLetter;
-						placed[fromTier] = placed[fromTier].filter((x) => x.id !== updated.id);
-						// avoid duplicates
-						const inQueue = queue.some((q) => q.id === updated.id);
-						if (!inQueue && !(current && current.id === updated.id)) {
-							if (updated.tier) {
-								queue = [updated, ...queue];
-							} else {
-								queue = [...queue, updated];
-							}
-							if (!current) showNext();
-						}
-					}
-
-					// If placed and tier changed, move to the new tier
-					if (newPlaced && prevPlacedTier && prevPlacedTier !== (updated.tier ?? 'F')) {
-						const fromTier = prevPlacedTier as TierLetter;
-						placed[fromTier] = placed[fromTier].filter((x) => x.id !== updated.id);
-						const newTier: TierLetter = (updated.tier ?? 'F') as TierLetter;
-						placed[newTier] = [...placed[newTier], updated];
-					}
-
-					// Keep UI copies in sync
-					if (current && current.id === rec.id) current = updated;
-					queue = queue.map((q) => (q.id === rec.id ? updated : q));
-					(['S', 'A', 'B', 'C', 'D', 'F'] as TierLetter[]).forEach((t) => {
-						placed[t] = placed[t].map((q) => (q.id === rec.id ? updated : q));
-					});
-				}
-			});
-		} finally {
-			loading = false;
-		}
-	});
-
-	onDestroy(() => {
-		if (unsubGameState) unsubGameState();
-		if (unsubProducts) unsubProducts();
-	});
-
 	async function showNext() {
 		if (!queue.length) {
 			current = null;
 			return;
 		}
 		current = queue[0]!;
-		// Update game state: set current product and enable interaction
-		try {
-			if (pb && gameStateId) {
-				await pb.collection('gameState').update(gameStateId, {
-					currentProduct: current.id,
-					interactionEnabled: true
-				});
-				interactionEnabled = true;
-			}
-		} catch (e) {
-			console.error('Failed to set current product', e);
-		}
 	}
 
 	async function advance() {
 		if (!current || advancing) return;
 		advancing = true;
 		try {
-			// Trigger confetti!
 			triggerConfetti();
-
-			// Disable interaction in game state
-			if (pb && gameStateId) {
-				await pb.collection('gameState').update(gameStateId, { interactionEnabled: false });
-				await pb.collection('reesesProducts').update(current.id, { placed: true });
-
-				interactionEnabled = false;
-			}
 
 			// Move current item into its tier to trigger crossfade
 			const tier: TierLetter = (current.tier ?? 'F') as TierLetter;

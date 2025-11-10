@@ -1,15 +1,17 @@
 Rogue Show — Context README
 
 Purpose
-An interactive live show built with SvelteKit + PocketBase. It starts as a Reese’s product tier-list experience led by a single host with many audience users, then progressively morphs into an AI-driven “rogue show” that takes over the experience in stages. There is only one show at a time.
+An interactive live show built with SvelteKit + built in Bun WebSocket server. It starts as a Reese’s product tier-list experience led by a single host with many audience users, then progressively morphs into an AI-driven “rogue show” that takes over the experience in stages. There is only one show at a time.
 
 Tech Stack
 Frontend: SvelteKit
-Backend/DB: PocketBase (auth, realtime, storage)
+Backend: Bun.js WebSocket server (realtime; no auth)
 Package manager: pnpm
+
 Roles
 Host: During the tier list phase, controls progression, reveals product tiers, advances stages. During the rogue phase, the host does banter with the ai, but the ai controls the game.
 Audience: Predicts product tiers, plays interstitial AI mini-games, submits guesses.
+
 Core Modes (State Machine)
 Mode: tierlist
 The default show: host-driven Reese’s tier ranking with audience predictions (called votes).
@@ -44,31 +46,36 @@ Submission: Users submit a separate “guess” of the quirk.
 Judging: An LLM judge evaluates if the guess is close enough to count as correct.
 Progression: Quirks grow more subtle and harder across rounds.
 
-Realtime & Session
+Realtime & Session (Bun WebSocket server)
 One host, many users.
 Host authority: advances products, reveals tiers, advances stages.
 Audience: submits predictions and mini-game inputs within time windows.
-Presence: optional lightweight presence for UI affordances.
+Identity: no auth; username is taken from the SvelteKit route parameter (e.g., `[username]`). Presence: optional lightweight presence for UI affordances.
+
 UI Notes
 Tier board: shows only the primary image per product placement.
 Buckets: some products bucket multiple similar variants; use first image on board.
 Friction events: scripted UX “glitches” to heighten narrative (do not break state).
+
 Non-Goals (for now)
 No complex moderation system.
 No arbitrary multi-host control.
 No long-term persistence beyond show recaps.
+
 Conventions
-State: single source of truth in PocketBase; client derives UI state from subscriptions.
+State: single source of truth on the Bun WebSocket server; clients derive UI state from WS messages.
 Commands: host actions are explicit mutations; audience actions are scoped to inputs.
 Env: use pnpm scripts for dev/build; keep API keys in .env (never hardcode).
+
 Success Criteria
 Smooth host-led tierlist with audience predictions and reveal flow.
 Intentional friction without losing data integrity or session continuity.
 Seamless transition into rogue mode, with staged AI capability unlocks.
 Engaging interstitial mini-games with LLM judge and escalating difficulty.
+
 Quick Start (dev)
 pnpm install
-Run PocketBase locally and configure collections above.
-Configure SvelteKit env for PocketBase URL and any AI providers.
+Run the Bun WebSocket server.
+Configure SvelteKit env for the WebSocket server URL and any AI providers.
 pnpm dev
 End state: a live, host-led show that evolves into an AI-driven experience.
