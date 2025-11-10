@@ -5,8 +5,8 @@ An interactive live show built with SvelteKit + built in Bun WebSocket server. I
 
 Tech Stack
 Frontend: SvelteKit
-Backend: Bun.js WebSocket server (realtime; no auth)
-Package manager: pnpm
+Backend: Bun.js WebSocket server
+Package manager: bun
 
 Roles
 Host: During the tier list phase, controls progression, reveals product tiers, advances stages. During the rogue phase, the host does banter with the ai, but the ai controls the game.
@@ -56,6 +56,7 @@ UI Notes
 Tier board: shows only the primary image per product placement.
 Buckets: some products bucket multiple similar variants; use first image on board.
 Friction events: scripted UX “glitches” to heighten narrative (do not break state).
+Host screen: The host's control screen (controls, stage information, and current view) will be visible to the audience in real time — design host UI assuming audience visibility (avoid placing private controls or secrets on the host screen). Host actions remain authoritative.
 
 Non-Goals (for now)
 No complex moderation system.
