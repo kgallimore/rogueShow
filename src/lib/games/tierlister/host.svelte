@@ -134,7 +134,10 @@
 
 			// Move current item into its tier to trigger crossfade
 			const tier: TierLetter = (current.tier ?? 'F') as TierLetter;
-			placed[tier] = [...placed[tier], current];
+			// Only add if not already present (prevent duplicates)
+			if (!placed[tier].some((item) => item.id === !?.id)) {
+				placed[tier] = [...placed[tier], current];
+			}
 
 			// Remove from queue and clear current to let it out:send
 			queue = queue.slice(1);

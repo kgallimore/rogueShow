@@ -1,5 +1,5 @@
 import type { WebSocketServer as WSServer } from 'ws';
-import type { WebSocketInitialMessage } from '$lib/types';
+import type { WebSocketInitialMessage } from '../src/lib/types';
 import type { ViteDevServer } from 'vite';
 
 import {
@@ -8,6 +8,13 @@ import {
 	DeepgramTranscriptionSocketHandler,
 	type BaseWebSocketHandler
 } from './websocketProxyClasses';
+import { GameWebSocketHandler } from './gameWebSocketHandler';
+import { getGameStateManager } from '../src/lib/games/gameStateManager';
+
+// Export the game state manager for access from other modules
+export function getSharedGameStateManager() {
+	return getGameStateManager();
+}
 
 export function setupWebSocketServer(wss: WSServer, server: ViteDevServer['httpServer']) {
 	const connections = new Set<BaseWebSocketHandler>();
@@ -20,7 +27,19 @@ export function setupWebSocketServer(wss: WSServer, server: ViteDevServer['httpS
 				try {
 					const msgText = typeof message === 'string' ? message : message.toString();
 					const msgData = JSON.parse(msgText) as WebSocketInitialMessage;
-					if (msgData.speak) {
+					if (msgData.game) {
+						messageHandler = new GameWebSocketHandler(ws);
+						// Send join message to handler
+						messageHandler.handleMessage(
+							Buffer.from(
+								JSON.stringify({
+									type: 'join',
+									role: msgData.game.role,
+									username: msgData.game.username
+								})
+							)
+						);
+					} else if (msgData.speak) {
 						if (msgData.speak.type === 'elevenLabs') {
 							messageHandler = new ElevenLabsTTSSocketHandler(
 								msgData.speak.voiceId ?? 'XEC4nrEbSXR7mdELOxaY',

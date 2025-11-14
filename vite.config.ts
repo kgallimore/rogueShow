@@ -3,10 +3,16 @@ import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type ViteDevServer } from 'vite';
 import { WebSocketServer } from 'ws';
-import { setupWebSocketServer } from './websocketServer/websocketServer';
+import { setupWebSocketServer, getSharedGameStateManager } from './websocketServer/websocketServer';
 
-// Store WebSocket server instance to properly clean it up on HMR
 let wss: WebSocketServer | null = null;
+let isCreating = false; // Flag to prevent multiple simultaneous creation attempts
+let retryCount = 0;
+const MAX_RETRIES = 10;
+
+declare global {
+	var __gameStateManager: ReturnType<typeof getSharedGameStateManager> | undefined;
+}
 
 export default defineConfig({
 	plugins: [
@@ -19,45 +25,94 @@ export default defineConfig({
 			configureServer(server: ViteDevServer) {
 				if (!server.httpServer) throw new Error('httpServer not available');
 
-				// Close existing WebSocket server if it exists (HMR cleanup)
-				if (wss) {
-					console.log('Closing existing WebSocket server...');
-					wss.close(() => {
-						console.log('WebSocket server closed');
-					});
-					wss = null;
-				}
-
-				// Create new WebSocket server
-				wss = new WebSocketServer({ port: 24678 }, () => {
-					console.log('WebSocket server started on port 24678');
-				});
-
-				// Handle server errors
-				wss.on('error', (error: NodeJS.ErrnoException) => {
-					if (error.code === 'EADDRINUSE') {
-						console.warn('Port 24678 is already in use, waiting for cleanup...');
-						// Retry after a short delay
-						setTimeout(() => {
-							if (!wss) {
-								wss = new WebSocketServer({ port: 24678 }, () => {
-									console.log('WebSocket server started on port 24678 (retry)');
-								});
-								setupWebSocketServer(wss, server.httpServer);
-							}
-						}, 1000);
-					} else {
-						console.error('WebSocket server error:', error);
+				const createWebSocketServer = () => {
+					// Don't create if one is already being created
+					if (isCreating) {
+						console.log('WebSocket server creation already in progress...');
+						return;
 					}
-				});
 
-				setupWebSocketServer(wss, server.httpServer);
+					// Don't create if one already exists and is open
+					if (wss) {
+						console.log('WebSocket server already exists, skipping creation');
+						return;
+					}
+
+					// Check retry limit
+					if (retryCount >= MAX_RETRIES) {
+						console.error(
+							`Failed to create WebSocket server after ${MAX_RETRIES} attempts. Please restart the dev server.`
+						);
+						return;
+					}
+
+					isCreating = true;
+					console.log('Creating WebSocket server on port 24678...');
+
+					try {
+						wss = new WebSocketServer({ port: 24678 }, () => {
+							isCreating = false;
+							retryCount = 0; // Reset retry count on success
+							console.log('WebSocket server started on port 24678');
+							setupWebSocketServer(wss!, server.httpServer);
+							// Store game state manager globally so it can be accessed from SvelteKit
+							global.__gameStateManager = getSharedGameStateManager();
+						});
+
+						// Handle server errors
+						wss.on('error', (error: NodeJS.ErrnoException) => {
+							isCreating = false;
+							if (error.code === 'EADDRINUSE') {
+								retryCount++;
+								const delay = Math.min(2000 * retryCount, 10000); // Exponential backoff, max 10s
+								console.warn(
+									`Port 24678 is already in use, retrying in ${delay / 1000} seconds... (attempt ${retryCount}/${MAX_RETRIES})`
+								);
+								wss = null;
+								setTimeout(() => {
+									createWebSocketServer();
+								}, delay);
+							} else {
+								console.error('WebSocket server error:', error);
+								wss = null;
+								retryCount = 0;
+							}
+						});
+
+						// Auto-restart if the WebSocket server closes unexpectedly
+						wss.on('close', () => {
+							console.log('WebSocket server closed');
+							wss = null;
+							isCreating = false;
+							retryCount = 0;
+							// Wait before restarting to ensure port is fully released
+							setTimeout(() => {
+								if (server.httpServer?.listening) {
+									console.log('Attempting to restart WebSocket server...');
+									createWebSocketServer();
+								}
+							}, 3000); // Longer delay to avoid TIME_WAIT issues
+						});
+					} catch (error) {
+						isCreating = false;
+						console.error('Failed to create WebSocket server:', error);
+						wss = null;
+						retryCount = 0;
+					}
+				};
+
+				// Create the initial WebSocket server
+				createWebSocketServer();
 
 				// Clean up on Vite server close
 				server.httpServer?.on('close', () => {
 					if (wss) {
+						console.log('HTTP server closing, shutting down WebSocket server...');
+						wss.removeAllListeners('close'); // Prevent auto-restart
 						wss.close();
 						wss = null;
+						isCreating = false;
+						retryCount = 0;
 					}
 				});
 			}

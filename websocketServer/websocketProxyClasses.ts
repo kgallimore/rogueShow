@@ -4,8 +4,9 @@ import type {
 	DeepgramTranscription,
 	WebsocketClientReceiveMessage,
 	WebsocketProxyMessage
-} from '$lib/types';
+} from '../src/lib/types';
 import WebSocket from 'ws';
+import type { GameServerMessage } from '../src/lib/games/types';
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const wavHeader = Buffer.from([
@@ -56,14 +57,14 @@ const wavHeader = Buffer.from([
 ]);
 
 export abstract class BaseWebSocketHandler {
-	private clientSocket: WebSocket;
+	protected clientSocket: WebSocket;
 
 	constructor(clientSocket: WebSocket) {
 		this.clientSocket = clientSocket;
 	}
 	abstract handleMessage(message: WebSocket.RawData): void;
 
-	sendClient(data: WebsocketClientReceiveMessage) {
+	sendClient(data: WebsocketClientReceiveMessage | GameServerMessage) {
 		if (this.clientSocket.readyState === WebSocket.OPEN) {
 			if (data instanceof ArrayBuffer || data instanceof Buffer || data instanceof Uint8Array) {
 				this.clientSocket.send(data, { binary: true });

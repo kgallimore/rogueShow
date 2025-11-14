@@ -6,6 +6,7 @@ export type WebsocketProxyMessage = {
 export type WebSocketInitialMessage = {
 	transcribe?: object;
 	speak?: { voiceId?: string; type: 'elevenLabs' | 'deepgram' };
+	game?: { role: 'host' | 'audience'; username: string };
 };
 export type WebsocketClientReceiveMessage =
 	| ArrayBuffer

@@ -21,12 +21,38 @@ Mode: interstitial
 Between AI stages, players participate in short LLM-powered puzzle rounds.
 Only one mode is active at a time.
 
+Product Assets & Tier Lookup
+
+Product Organization
+Products are organized in the `static/assets` folder. Each subfolder represents one product group for tier list purposes. A subfolder may contain multiple images (variants), but only the primary image is displayed on the tier list board.
+
+Tier Lookup System
+The tier lookup file (`src/lib/games/tierlister/tierLookup.ts`) maps each product subfolder to its tier assignment. Each entry includes:
+- `tier`: The assigned tier (S, A, B, C, D, or F)
+- `primaryImage` (optional): The filename of the primary image within the subfolder (e.g., "primary.jpg"). If not specified, the first image found in the subfolder is used.
+- `reasonings` (optional): An array of strings explaining the tier placement rationale.
+
+Workflow:
+1. Products are placed in `static/assets/` as subfolders (e.g., `static/assets/reeses-cups/`, `static/assets/reeses-pieces/`)
+2. Each subfolder name is added to the `tierLookup` map in `tierLookup.ts` with its tier assignment
+3. The system uses this lookup to determine the correct tier when products are revealed
+4. The primary image (if specified) or first image in the subfolder is used for display on the tier board
+
+Example tier lookup entry:
+```typescript
+"reeses-cups": {
+  tier: "S",
+  primaryImage: "main.jpg",
+  reasonings: ["Classic flavor", "Perfect texture", "Iconic product"]
+}
+```
+
 Show Flow
 
 1. Setup
-   Host selects a Reese’s product sequence. Products can be bucketed; each may have multiple images but only the primary image is placed on the tier list. The audience can place their predictions (votes) for the tier of the current product. They can change their vote at any time, and the total votes are displayed in realtime for each tier.
+   Host selects a Reese's product sequence. Products are loaded from subfolders in `static/assets/`, with tier assignments read from the tier lookup file. Products can be bucketed; each may have multiple images but only the primary image is placed on the tier list. The audience can place their predictions (votes) for the tier of the current product. They can change their vote at any time, and the total votes are displayed in realtime for each tier.
 2. Reveal
-   Host advances to reveal the actual tier; primary image appears on the tier list board. The next product is then revealed, and the sequence continues.
+   Host advances to reveal the actual tier (from the tier lookup); primary image appears on the tier list board. The next product is then revealed, and the sequence continues.
 3. Orchestrated Friction
    Occasional “weird events/bugs” intentionally frustrate/annoy users and host.
 4. Shift to Rogue Mode
